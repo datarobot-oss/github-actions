@@ -1,0 +1,12 @@
+name: Notify GenAI team on "Ready for review" PRs
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+jobs:
+  notify:
+    uses: ./.github/workflows/tool-notify-slack.yaml
+    secrets:
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
