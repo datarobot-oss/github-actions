@@ -7,6 +7,6 @@ on:
 jobs:
   mark-reviewed:
     if: github.event.review.state == 'approved'
-    uses: ./.github/workflows/tool-mark-pr-reviewed.yaml
+    uses: ./.github/workflows/mark-pr-reviewed.yaml
     with:
       pr_number: ${{ github.event.pull_request.number }}

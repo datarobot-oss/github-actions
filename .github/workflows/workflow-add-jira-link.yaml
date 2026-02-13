@@ -6,7 +6,7 @@ on:
 
 jobs:
   add-jira-link:
-    uses: ./.github/workflows/tool-add-jira-link.yaml
+    uses: ./.github/workflows/add-jira-link.yaml
     with:
       pr_title: ${{ github.event.pull_request.title }}
       pr_number: ${{ github.event.pull_request.number }}

@@ -1,0 +1,16 @@
+name: af-component-agent Release
+
+on:
+  push:
+    branches: ["main"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    uses: ./.github/workflows/create-release-on-merge.yaml
+    permissions:
+      contents: write
+      pull-requests: read
