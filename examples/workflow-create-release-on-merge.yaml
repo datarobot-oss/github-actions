@@ -1,0 +1,16 @@
+name: Create Release on Merge to Main
+
+on:
+  push:
+    branches: ["main"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    uses: datarobot-oss/github-actions/.github/workflows/create-release-on-merge.yaml@0.0.3
+    permissions:
+      contents: write
+      pull-requests: read

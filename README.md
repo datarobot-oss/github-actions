@@ -24,6 +24,11 @@
 
 A collection of github actions tools for use in open source projects.
 
+# Using this Repo
+Copy example workflows from the `examples` directory to your `.github/workflows` folder in your repo. You can bump the `@VERSION` field to upgrade
+to new revisions. The examples should be drop in and go. You make need to add the appropriate `SECRET` keys to your repo such as:
+- `SLACK_WEBHOOK_URL` (receive slack notifications in the specified channel)
+
 
 # Get help
 
