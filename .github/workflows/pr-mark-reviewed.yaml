@@ -1,0 +1,12 @@
+name: Mark PR as Reviewed
+
+on:
+  pull_request_review:
+    types: [submitted]
+
+jobs:
+  mark-reviewed:
+    if: github.event.review.state == 'approved'
+    uses: ./.github/workflows/tool-mark-pr-reviewed.yaml
+    with:
+      pr_number: ${{ github.event.pull_request.number }}
