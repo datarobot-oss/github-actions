@@ -1,4 +1,4 @@
-name: Notify GenAI team on "Ready for review" PRs
+name: Notify GenAI team on "Ready for review" PRs on schedule
 
 on:
   schedule:
