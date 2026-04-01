@@ -26,8 +26,9 @@ jobs:
           PR_TITLE="${{ inputs.pr_title }}"
           PR_BRANCH="${{ inputs.pr_branch }}"
 
-          # Extract ticket ID from PR title: [BUZZOK-12345] or [PROJECT-123]
-          TICKET_ID=$(echo "$PR_TITLE" | grep -oE '\[([A-Z]+-[0-9]+)\]' | tr -d '[]' || echo "")
+          # Extract ticket ID(s) from PR title: [BUZZOK-12345] or [PROJECT-123]
+          # Multiple tickets are joined with commas so the output stays on one line
+          TICKET_ID=$(echo "$PR_TITLE" | grep -oE '\[([A-Z]+-[0-9]+)\]' | tr -d '[]' | paste -sd ',' - || echo "")
 
           # Fallback: extract from branch name, e.g. user/BUZZOK-2342-something or BUZZOK-1234
           if [ -z "$TICKET_ID" ]; then
@@ -48,9 +49,11 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const ticketId = '${{ steps.extract-ticket.outputs.ticket-id }}';
-            const jiraUrl = `https://datarobot.atlassian.net/browse/${ticketId}`;
-            const commentBody = `### 🎫 Jira Ticket\n\n[${ticketId}](${jiraUrl})`;
+            const ticketIds = '${{ steps.extract-ticket.outputs.ticket-id }}'.split(',').filter(Boolean);
+            const links = ticketIds.map(id => `[${id}](https://datarobot.atlassian.net/browse/${id})`);
+            const header = ticketIds.length === 1 ? '### 🎫 Jira Ticket' : '### 🎫 Jira Tickets';
+            const body = ticketIds.length === 1 ? links[0] : links.map(l => `- ${l}`).join('\n');
+            const commentBody = `${header}\n\n${body}`;
 
             // Check if we already commented
             const { data: comments } = await github.rest.issues.listComments({
