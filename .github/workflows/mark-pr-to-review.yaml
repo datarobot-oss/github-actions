@@ -55,15 +55,23 @@ jobs:
           fi
 
       - name: Send notification to Slack
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          PR_NR_INPUT: ${{ inputs.pr_number }}
+          PR_URL_INPUT: ${{ inputs.pr_url }}
+          PR_TITLE_INPUT: ${{ inputs.pr_title }}
+          PR_AUTHOR_INPUT: ${{ inputs.pr_author }}
+          PR_ADDITIONS_INPUT: ${{ inputs.pr_additions }}
+          PR_DELETIONS_INPUT: ${{ inputs.pr_deletions }}
+          REPO_NAME_INPUT: ${{ inputs.repo_name }}
         run: |
-          SLACK_WEBHOOK_URL="${{ secrets.SLACK_WEBHOOK_URL }}"
-          PR_NR="${{ inputs.pr_number }}"
-          PR_URL="${{ inputs.pr_url }}"
-          PR_TITLE="${{ inputs.pr_title }}"
-          PR_AUTHOR="${{ inputs.pr_author }}"
-          PR_ADDITIONS="${{ inputs.pr_additions }}"
-          PR_DELETIONS="${{ inputs.pr_deletions }}"
-          REPO_NAME="${{ inputs.repo_name }}"
+          PR_NR="${PR_NR_INPUT}"
+          PR_URL="${PR_URL_INPUT}"
+          PR_TITLE="${PR_TITLE_INPUT}"
+          PR_AUTHOR="${PR_AUTHOR_INPUT}"
+          PR_ADDITIONS="${PR_ADDITIONS_INPUT}"
+          PR_DELETIONS="${PR_DELETIONS_INPUT}"
+          REPO_NAME="${REPO_NAME_INPUT}"
 
           # Escape special characters for JSON
           PR_TITLE_ESCAPED=$(echo "$PR_TITLE" | sed 's/\\/\\\\/g; s/"/\\"/g')
