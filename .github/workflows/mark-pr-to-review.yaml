@@ -31,6 +31,8 @@ on:
 jobs:
   notify-slack:
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
 
     steps:
       - name: Add team-specific labels based on reviewers

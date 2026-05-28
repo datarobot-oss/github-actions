@@ -10,3 +10,5 @@ jobs:
     uses: ./.github/workflows/mark-pr-reviewed.yaml
     with:
       pr_number: ${{ github.event.pull_request.number }}
+    permissions:
+      pull-requests: write
