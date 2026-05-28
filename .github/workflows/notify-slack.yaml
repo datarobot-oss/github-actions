@@ -51,7 +51,15 @@ jobs:
           for PR_NUMBER in $PR_NUMBERS; do
             REVIEWS=$(curl -s -H "Authorization: token $GH_TOKEN" \
               "https://api.github.com/repos/${REPO_NAME}/pulls/${PR_NUMBER}/reviews")
-            HAS_APPROVAL=$(echo "$REVIEWS" | jq '[.[] | select(.state == "APPROVED")] | length > 0')
+            # Take the latest APPROVED/CHANGES_REQUESTED review per reviewer;
+            # COMMENTED reviews don't affect approval state so they're excluded.
+            # This prevents a stale approval from hiding a PR that needs re-review.
+            HAS_APPROVAL=$(echo "$REVIEWS" | jq '
+              [ .[] | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED") ]
+              | group_by(.user.login)
+              | map(sort_by(.submitted_at) | last | .state)
+              | any(. == "APPROVED")
+            ')
 
             if [ "$HAS_APPROVAL" = "true" ]; then
               echo "Skipping PR #$PR_NUMBER - already has an approval"
