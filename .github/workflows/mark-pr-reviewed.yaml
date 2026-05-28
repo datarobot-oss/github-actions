@@ -10,6 +10,8 @@ on:
 jobs:
   add-reviewed-label:
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
 
     steps:
       - name: Add "00 - Reviewed" label

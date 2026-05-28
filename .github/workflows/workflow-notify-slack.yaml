@@ -10,3 +10,6 @@ jobs:
     uses: ./.github/workflows/notify-slack.yaml
     secrets:
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+    permissions:
+      contents: read
+      pull-requests: read

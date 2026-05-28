@@ -31,15 +31,16 @@ on:
 jobs:
   notify-slack:
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
 
     steps:
       - name: Add team-specific labels based on reviewers
         if: false
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NR: ${{ inputs.pr_number }}
         run: |
-          PR_NR="${{ inputs.pr_number }}"
-
           # Check if Buzok team is a code reviewer and add label if needed
           PR_REVIEWERS=$(gh pr view "$PR_NR" --json reviewRequests --jq '.reviewRequests[].name, .reviewRequests[].slug')
           echo "PR Reviewers: $PR_REVIEWERS"
@@ -55,32 +56,37 @@ jobs:
           fi
 
       - name: Send notification to Slack
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          PR_NR: ${{ inputs.pr_number }}
+          PR_URL: ${{ inputs.pr_url }}
+          PR_TITLE: ${{ inputs.pr_title }}
+          PR_AUTHOR: ${{ inputs.pr_author }}
+          PR_ADDITIONS: ${{ inputs.pr_additions }}
+          PR_DELETIONS: ${{ inputs.pr_deletions }}
+          REPO_NAME: ${{ inputs.repo_name }}
         run: |
-          SLACK_WEBHOOK_URL="${{ secrets.SLACK_WEBHOOK_URL }}"
-          PR_NR="${{ inputs.pr_number }}"
-          PR_URL="${{ inputs.pr_url }}"
-          PR_TITLE="${{ inputs.pr_title }}"
-          PR_AUTHOR="${{ inputs.pr_author }}"
-          PR_ADDITIONS="${{ inputs.pr_additions }}"
-          PR_DELETIONS="${{ inputs.pr_deletions }}"
-          REPO_NAME="${{ inputs.repo_name }}"
-
-          # Escape special characters for JSON
-          PR_TITLE_ESCAPED=$(echo "$PR_TITLE" | sed 's/\\/\\\\/g; s/"/\\"/g')
-          PR_AUTHOR_ESCAPED=$(echo "$PR_AUTHOR" | sed 's/\\/\\\\/g; s/"/\\"/g')
-          REPO_NAME_ESCAPED=$(echo "$REPO_NAME" | sed 's/\\/\\\\/g; s/"/\\"/g')
+          # Build the Slack payload via jq so PR-controlled fields can never
+          # break out of JSON string context regardless of their contents.
+          PAYLOAD=$(jq -n \
+            --arg pr_nr "$PR_NR" \
+            --arg pr_url "$PR_URL" \
+            --arg pr_title "$PR_TITLE" \
+            --arg pr_author "$PR_AUTHOR" \
+            --arg pr_additions "$PR_ADDITIONS" \
+            --arg pr_deletions "$PR_DELETIONS" \
+            --arg repo_name "$REPO_NAME" \
+            '{
+              text: "*Pull Request Ready for Review!*",
+              blocks: [{
+                type: "section",
+                text: {
+                  type: "mrkdwn",
+                  text: ("@buzok-team: :rocket: PR by " + $pr_author + " needs a review:\n<" + $pr_url + "|" + $repo_name + "#" + $pr_nr + ": " + $pr_title + "> `+" + $pr_additions + " -" + $pr_deletions + "`")
+                }
+              }]
+            }')
 
           curl -X POST -H 'Content-type: application/json' \
-          --data "{
-            \"text\": \"*Pull Request Ready for Review!*\",
-            \"blocks\": [
-              {
-                \"type\": \"section\",
-                \"text\": {
-                  \"type\": \"mrkdwn\",
-                  \"text\": \"@buzok-team: :rocket: PR by ${PR_AUTHOR_ESCAPED} needs a review:\\n<${PR_URL}|${REPO_NAME_ESCAPED}#${PR_NR}: ${PR_TITLE_ESCAPED}> \`+${PR_ADDITIONS} -${PR_DELETIONS}\`\"
-                }
-              }
-            ]
-          }" \
-          "${SLACK_WEBHOOK_URL}"
+            --data "$PAYLOAD" \
+            "$SLACK_WEBHOOK_URL"

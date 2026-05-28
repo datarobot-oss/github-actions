@@ -18,3 +18,5 @@ jobs:
       repo_name: ${{ github.event.repository.name }}
     secrets:
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+    permissions:
+      pull-requests: write
