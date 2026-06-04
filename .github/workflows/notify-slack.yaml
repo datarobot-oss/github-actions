@@ -12,6 +12,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
+      checks: read
 
     steps:
       - name: Fetch open PRs with ready for review labels
@@ -82,6 +83,15 @@ jobs:
               )] | last | .created_at // ""
             ')
 
+            HEAD_SHA=$(echo "$PR_DETAIL" | jq -r '.head.sha')
+            STATUS=$(curl -s -H "Authorization: token $GH_TOKEN" \
+              "https://api.github.com/repos/${REPO_NAME}/commits/${HEAD_SHA}/status" | jq -r '.state')
+            case "$STATUS" in
+              success)        STATUS_ICON=":green_with_check:" ;;
+              failure|error)  STATUS_ICON=":red_with_cross:" ;;
+              *)               STATUS_ICON=":yellow_pending:" ;;
+            esac
+
             WAITING=""
             if [ -n "$LABELED_AT" ]; then
               LABELED_EPOCH=$(date -u -d "$LABELED_AT" +%s)
@@ -101,6 +111,7 @@ jobs:
               --argjson existing "$PR_RECORDS" \
               --argjson pr "$PR_DETAIL" \
               --arg waiting "$WAITING" \
+              --arg status_icon "$STATUS_ICON" \
               '$existing + [{
                 number: $pr.number,
                 title: $pr.title,
@@ -108,7 +119,8 @@ jobs:
                 additions: $pr.additions,
                 deletions: $pr.deletions,
                 html_url: $pr.html_url,
-                waiting: $waiting
+                waiting: $waiting,
+                status_icon: $status_icon
               }]')
             echo "Found PR marked as ready for review: #$PR_NUMBER"
           done
@@ -142,7 +154,7 @@ jobs:
                   type: "mrkdwn",
                   text: (":clipboard: <https://github.com/\($repo)/pulls|\($repo_short)> Here are the open PRs ready for review:\n" +
                     ([$prs[] |
-                      "• <\(.html_url)|\($repo_short)#\(.number): \(.title)> by \(.user) needs a review:\(.waiting) `+\(.additions) -\(.deletions)`"
+                      "• \(.status_icon) <\(.html_url)|\($repo_short)#\(.number): \(.title)> by \(.user) needs a review:\(.waiting) `+\(.additions) -\(.deletions)`"
                     ] | join("\n")))
                 }
               }]
