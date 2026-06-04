@@ -47,6 +47,7 @@ jobs:
         run: |
           # Build a JSON array of PR records — PR-controlled strings (title,
           # author) stay inside JSON the whole way, never touching the shell.
+          NOW=$(date -u +%s)
           PR_RECORDS="[]"
           for PR_NUMBER in $PR_NUMBERS; do
             REVIEWS=$(curl -s -H "Authorization: token $GH_TOKEN" \
@@ -70,16 +71,44 @@ jobs:
               echo "Skipping PR #$PR_NUMBER - approved with no pending re-review requests"
               continue
             fi
+            # Find when the "ready for review" label was most recently applied.
+            # Issues events API is covered by pull-requests: read — no extra permissions needed.
+            LABEL_EVENTS=$(curl -s -H "Authorization: token $GH_TOKEN" \
+              "https://api.github.com/repos/${REPO_NAME}/issues/${PR_NUMBER}/events?per_page=100")
+            LABELED_AT=$(echo "$LABEL_EVENTS" | jq -r '
+              [.[] | select(
+                .event == "labeled" and
+                (.label.name | ascii_downcase | test("ready for review"))
+              )] | last | .created_at // ""
+            ')
+
+            WAITING=""
+            if [ -n "$LABELED_AT" ]; then
+              LABELED_EPOCH=$(date -u -d "$LABELED_AT" +%s)
+              SECS=$(( NOW - LABELED_EPOCH ))
+              DAYS=$(( SECS / 86400 ))
+              HOURS=$(( (SECS % 86400) / 3600 ))
+              if [ "$DAYS" -gt 0 ]; then
+                WAITING=" (waiting ${DAYS}d ${HOURS}h)"
+              elif [ "$HOURS" -gt 0 ]; then
+                WAITING=" (waiting ${HOURS}h)"
+              else
+                WAITING=" (waiting <1h)"
+              fi
+            fi
+
             PR_RECORDS=$(jq -n \
               --argjson existing "$PR_RECORDS" \
               --argjson pr "$PR_DETAIL" \
+              --arg waiting "$WAITING" \
               '$existing + [{
                 number: $pr.number,
                 title: $pr.title,
                 user: $pr.user.login,
                 additions: $pr.additions,
                 deletions: $pr.deletions,
-                html_url: $pr.html_url
+                html_url: $pr.html_url,
+                waiting: $waiting
               }]')
             echo "Found PR marked as ready for review: #$PR_NUMBER"
           done
@@ -97,19 +126,23 @@ jobs:
         if: env.PR_RECORDS != '' && env.PR_RECORDS != '[]'
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          REPO_NAME: ${{ github.repository }}
         run: |
+          REPO_SHORT="${REPO_NAME##*/}"
           # jq builds the entire payload; PR-controlled strings stay in JSON.
           PAYLOAD=$(jq -n \
             --argjson prs "$PR_RECORDS" \
+            --arg repo "$REPO_NAME" \
+            --arg repo_short "$REPO_SHORT" \
             '{
               text: "*Pull Requests Ready for Review Summary*",
               blocks: [{
                 type: "section",
                 text: {
                   type: "mrkdwn",
-                  text: (":clipboard: Here are the open PRs ready for review:\n" +
+                  text: (":clipboard: <https://github.com/\($repo)/pulls|\($repo_short)> Here are the open PRs ready for review:\n" +
                     ([$prs[] |
-                      "• PR <\(.html_url)|#\(.number): \(.title)> by \(.user) needs a review: `+\(.additions) -\(.deletions)`"
+                      "• <\(.html_url)|\($repo_short)#\(.number): \(.title)> by \(.user) needs a review:\(.waiting) `+\(.additions) -\(.deletions)`"
                     ] | join("\n")))
                 }
               }]
