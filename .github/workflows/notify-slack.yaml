@@ -2,6 +2,12 @@ name: Notify GenAI team on "Ready for review" PRs
 
 on:
   workflow_call:
+    inputs:
+      header_icon:
+        description: 'Slack emoji name (without colons) to use as the header icon, e.g. "clipboard" or "mega"'
+        required: false
+        default: 'clipboard'
+        type: string
     secrets:
       SLACK_WEBHOOK_URL:
         required: true
@@ -141,18 +147,20 @@ jobs:
           REPO_NAME: ${{ github.repository }}
         run: |
           REPO_SHORT="${REPO_NAME##*/}"
+          HEADER_ICON="${{ inputs.header_icon }}"
           # jq builds the entire payload; PR-controlled strings stay in JSON.
           PAYLOAD=$(jq -n \
             --argjson prs "$PR_RECORDS" \
             --arg repo "$REPO_NAME" \
             --arg repo_short "$REPO_SHORT" \
+            --arg header_icon "$HEADER_ICON" \
             '{
               text: "*Pull Requests Ready for Review Summary*",
               blocks: [{
                 type: "section",
                 text: {
                   type: "mrkdwn",
-                  text: (":clipboard: <https://github.com/\($repo)/pulls|\($repo_short)> Here are the open PRs ready for review:\n" +
+                  text: (":\($header_icon): <https://github.com/\($repo)/pulls|\($repo_short)> Here are the open PRs ready for review:\n" +
                     ([$prs[] |
                       "• \(.status_icon) <\(.html_url)|\($repo_short)#\(.number): \(.title)> by \(.user) needs a review:\(.waiting) `+\(.additions) -\(.deletions)`"
                     ] | join("\n")))
