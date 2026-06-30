@@ -1,0 +1,41 @@
+#!/usr/bin/env node
+// `curl` stub for the bash tests.
+//   * GET  -> matches the requested URL against __CURL_FIXTURES (JSON array of
+//             {match, body}) and prints the first matching body. Unmatched GETs
+//             print "{}" so jq still has valid JSON to chew on.
+//   * POST / --data -> captures {url, data} as a JSON line in __CURL_CAPTURE so a
+//             test can assert exactly what would have been sent (e.g. to Slack).
+import { appendFileSync } from 'node:fs';
+const args = process.argv.slice(2);
+
+let method = 'GET';
+let data = null;
+let url = null;
+for (let i = 0; i < args.length; i++) {
+  const a = args[i];
+  if (a === '-X' || a === '--request') method = args[++i];
+  else if (a === '--data' || a === '-d' || a === '--data-raw') { data = args[++i]; method = method === 'GET' ? 'POST' : method; }
+  else if (a === '-H' || a === '--header') i++; // skip header value
+  else if (a === '-s' || a === '--silent') { /* no-op */ }
+  else if (a.startsWith('http')) url = a;
+}
+
+const captureFile = process.env.__CURL_CAPTURE;
+if ((method === 'POST' || data !== null) && captureFile) {
+  appendFileSync(captureFile, JSON.stringify({ url, data }) + '\n');
+  process.stdout.write('{"ok":true}\n');
+  process.exit(0);
+}
+
+let fixtures = [];
+try {
+  fixtures = JSON.parse(process.env.__CURL_FIXTURES || '[]');
+} catch {
+  fixtures = [];
+}
+// Longest match wins, so a specific URL (pulls/1/reviews) beats a prefix of it
+// (pulls/1) regardless of declaration order.
+const hit = fixtures
+  .filter((f) => url && url.includes(f.match))
+  .sort((a, b) => b.match.length - a.match.length)[0];
+process.stdout.write((hit ? JSON.stringify(hit.body) : '{}') + '\n');

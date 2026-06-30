@@ -30,6 +30,13 @@ to new revisions. The examples should be drop in and go. You make need to add th
 - `SLACK_WEBHOOK_URL` (receive slack notifications in the specified channel)
 
 
+# Contributing & testing
+
+The reusable workflows are linted and unit-tested so changes can be validated on
+the PR before a release tag is cut. Run `task ci` (lint + tests) before opening
+a PR. See [TESTING.md](TESTING.md) for details and how to add tests for a new
+workflow.
+
 # Get help
 
 If you encounter issues or have questions, try the following:

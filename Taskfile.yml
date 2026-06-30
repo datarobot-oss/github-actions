@@ -1,0 +1,42 @@
+# go-task targets for running this repo's self-tests and linters locally.
+# These mirror the .github/workflows/self-test.yaml CI jobs so a green
+# `task` run locally means CI should be green too. Install go-task:
+#   https://taskfile.dev/installation/
+version: '3'
+
+tasks:
+  default:
+    desc: Show available tasks
+    cmds:
+      - task --list
+    silent: true
+
+  ci:
+    desc: Run everything CI runs (lint + tests)
+    cmds:
+      - task: lint
+      - task: test
+
+  install:
+    desc: Install Node test dependencies
+    cmds:
+      - npm install
+    # Skip if deps are already present.
+    status:
+      - test -d node_modules
+
+  test:
+    desc: Unit-test the bash / github-script logic embedded in the workflows
+    deps: [install]
+    cmds:
+      - npm test
+
+  lint:
+    desc: Lint all workflows (actionlint + shellcheck) via Docker — matches CI exactly
+    cmds:
+      - docker run --rm -v "$PWD:/repo" --workdir /repo rhysd/actionlint:1.7.12 -color
+
+  clean:
+    desc: Remove installed dependencies and local tooling
+    cmds:
+      - rm -rf node_modules .actionlint-bin

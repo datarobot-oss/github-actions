@@ -132,8 +132,8 @@ jobs:
           done
 
           # Pass the JSON to the next step via env (multiline) — avoids the
-          # ${{ steps.X.outputs.Y }} interpolation that would re-expand
-          # attacker-controlled fields into bash source.
+          # step-output interpolation (the double-brace steps.*.outputs.* form)
+          # that would re-expand attacker-controlled fields into bash source.
           {
             echo "PR_RECORDS<<PR_RECORDS_EOF"
             echo "$PR_RECORDS"

@@ -1,0 +1,9 @@
+# Node test harness
+node_modules/
+npm-debug.log*
+
+# Local actionlint binary (use `task lint`, which runs it via Docker)
+.actionlint-bin/
+
+# OS / editor cruft
+.DS_Store

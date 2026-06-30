@@ -1,0 +1,6 @@
+#!/usr/bin/env node
+// `gh` CLI stub. The only step using gh (mark-pr-to-review's labelling step) is
+// gated behind `if: false`, so this should never be reached in practice — it
+// exists so an accidental call fails loudly instead of hitting the network.
+process.stderr.write(`gh stub: unexpected call: gh ${process.argv.slice(2).join(' ')}\n`);
+process.exit(1);

@@ -19,12 +19,15 @@ jobs:
       - name: Get latest tag
         id: get-latest-tag
         run: |
-          # Get the latest semver tag (with or without v prefix), or use 0.0.0 if no tags exist
-          LATEST_TAG=$(git tag --list | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' | sed 's/^v//' | sort -V | tail -n 1)
+          # Get the latest semver tag (with or without v prefix), or use 0.0.0 if no tags exist.
+          # The trailing `|| true` is required: under `bash -eo pipefail` (GitHub's default
+          # shell) a no-match from grep aborts the step, so without it the 0.0.0 fallback below
+          # would be unreachable on a repo with no semver tags yet (the first release).
+          LATEST_TAG=$(git tag --list | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' | sed 's/^v//' | sort -V | tail -n 1 || true)
           if [ -z "$LATEST_TAG" ]; then
             LATEST_TAG="0.0.0"
           fi
-          echo "latest-tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+          echo "latest-tag=$LATEST_TAG" >> "$GITHUB_OUTPUT"
           echo "Latest tag: $LATEST_TAG"
       - name: Generate next version
         id: next-version
@@ -43,7 +46,7 @@ jobs:
           PATCH=$((PATCH + 1))
 
           NEW_VERSION="$MAJOR.$MINOR.$PATCH"
-          echo "new-version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "new-version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
           echo "Next version: $NEW_VERSION"
       - name: Create Release
         uses: softprops/action-gh-release@v2
