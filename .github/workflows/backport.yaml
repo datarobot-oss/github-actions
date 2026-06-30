@@ -1,0 +1,145 @@
+name: Backport merged PR
+
+# Reusable workflow: cherry-pick a merged PR onto one or more target branches.
+#
+# Triggered by labels of the form `backport <branch>` on a merged PR
+# (e.g. `backport release/12.0`). Add several labels to backport to several
+# branches at once. The destination is encoded in the label, so there is nothing
+# else to configure per-PR.
+#
+# Token / CI behaviour:
+#   * If the optional APP_ID + APP_PRIVATE_KEY secrets are provided, the backport
+#     PR is opened by a GitHub App and CI runs on it automatically.
+#   * If they are absent, it falls back to the built-in GITHUB_TOKEN. The backport
+#     still happens, but CI will NOT auto-run on the resulting PR (a GITHUB_TOKEN
+#     limitation) — push an empty commit or re-open the PR to kick the checks.
+#   No change to consuming repos is needed to switch between the two; just add the
+#   secrets when the App exists.
+
+on:
+  workflow_call:
+    inputs:
+      pr_number:
+        description: "Number of the merged PR to backport."
+        required: true
+        type: number
+      label_pattern:
+        description: "Regex whose first capture group is the target branch."
+        required: false
+        type: string
+        default: '^backport ([^ ]+)$'
+    secrets:
+      APP_ID:
+        description: "GitHub App ID (optional; enables CI on the backport PR)."
+        required: false
+      APP_PRIVATE_KEY:
+        description: "GitHub App private key (optional)."
+        required: false
+
+jobs:
+  backport:
+    name: "Backport"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      # Evaluated once so both the `if` and the step can read it without touching
+      # the masked secret values directly.
+      HAS_APP_CREDS: ${{ secrets.APP_ID != '' && secrets.APP_PRIVATE_KEY != '' }}
+    steps:
+      - name: Generate GitHub App token
+        id: app-token
+        if: env.HAS_APP_CREDS == 'true'
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token || github.token }}
+
+      - name: Create backport PR(s)
+        id: backport
+        uses: korthout/backport-action@v3
+        with:
+          github_token: ${{ steps.app-token.outputs.token || github.token }}
+          label_pattern: ${{ inputs.label_pattern }}
+          pull_title: "[Backport ${target_branch}] ${pull_title}"
+          pull_description: |
+            Automated backport of #${pull_number} to `${target_branch}`.
+
+            > Cherry-picked by the shared `backport` workflow. Review carefully and
+            > confirm CI is green before merging onto the LTS branch.
+          # Skip the merge commit itself and cherry-pick the squashed/merged content.
+          merge_commits: skip
+          # Carry over non-backport labels so context isn't lost on the new PR.
+          copy_labels_pattern: '^(?!backport).*$'
+
+      - name: Label & comment with backport result
+        if: always() && steps.backport.outcome != 'skipped'
+        uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ inputs.pr_number }}
+          BY_TARGET: ${{ steps.backport.outputs.was_successful_by_target }}
+          CREATED: ${{ steps.backport.outputs.created_pull_numbers }}
+        with:
+          github-token: ${{ steps.app-token.outputs.token || github.token }}
+          script: |
+            const prNumber = Number(process.env.PR_NUMBER);
+            const byTarget = (process.env.BY_TARGET || '').trim();
+            const created = (process.env.CREATED || '').trim();
+
+            // korthout emits one `branch=true|false` line per target label.
+            const succeeded = [];
+            const failed = [];
+            for (const line of byTarget.split(/\r?\n/).map(l => l.trim()).filter(Boolean)) {
+              const idx = line.lastIndexOf('=');
+              if (idx === -1) continue;
+              const branch = line.slice(0, idx);
+              const ok = line.slice(idx + 1) === 'true';
+              (ok ? succeeded : failed).push(branch);
+            }
+
+            // Keep the trigger label as the record; add a done label per target.
+            const labels = succeeded.map(b => `backported ${b}`);
+            if (failed.length) labels.push('backport-failed');
+            if (labels.length) {
+              // addLabels auto-creates labels that don't exist yet.
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                labels,
+              });
+            }
+
+            const lines = [];
+            if (succeeded.length) {
+              const prs = created ? ` (${created.split(/\s+/).map(n => `#${n}`).join(', ')})` : '';
+              lines.push(`🍒 **Backported** to: ${succeeded.map(b => `\`${b}\``).join(', ')}${prs}`);
+            }
+            if (failed.length) {
+              lines.push(`⚠️ **Backport failed** for: ${failed.map(b => `\`${b}\``).join(', ')} — likely a merge conflict.`);
+              lines.push('');
+              lines.push('See the comment above for manual `git cherry-pick` instructions, or run:');
+              lines.push('```bash');
+              for (const b of failed) {
+                lines.push(`git checkout ${b} && git pull`);
+                lines.push(`git checkout -b backport/pr-${prNumber}-${b.replace(/[^a-zA-Z0-9._-]/g, '-')}`);
+                lines.push(`git cherry-pick <merge_sha>   # use -m 1 for a merge commit`);
+                lines.push('');
+              }
+              lines.push('```');
+            }
+            if (lines.length) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: lines.join('\n'),
+              });
+            }

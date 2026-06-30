@@ -1,5 +1,7 @@
 name: Create Release on Merge to Main
 
+# Required labels: none. (Triggers on push to main; tags/releases only.)
+
 on:
   push:
     branches: ["main"]
