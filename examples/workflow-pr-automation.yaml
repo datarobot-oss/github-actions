@@ -1,5 +1,25 @@
 name: PR Automation
 
+# ─── REQUIRED LABELS (repo admin must create these in the repo) ───────────────
+# Without them the jobs below silently no-op or fail. Trigger labels and any
+# label applied via `gh` MUST pre-exist; labels applied via the REST API are
+# auto-created but should still be pre-made for colour/description.
+#
+#   `ready for review`                       — TRIGGER (devs apply by hand) for
+#                                              notify-ready-for-review + the Slack
+#                                              digest. MUST exist.
+#   `Needs Review: GenAI Tooling (Buzok)`    — applied by mark-pr-to-review via
+#                                              `gh pr edit --add-label`, which
+#                                              HARD-FAILS if the label is missing.
+#                                              MUST exist.
+#   `Needs Review: Docs`                     — same as above. MUST exist.
+#   `00 - Reviewed`                          — applied on approval (REST API,
+#                                              auto-created); pre-create for
+#                                              colour/description. Also excludes a
+#                                              PR from the Slack digest.
+# (add-jira-link and notify-slack-scheduled need no labels of their own.)
+# ─────────────────────────────────────────────────────────────────────────────
+
 on:
   pull_request_review:
     types: [submitted]

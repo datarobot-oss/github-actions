@@ -1,0 +1,34 @@
+name: Backport
+
+# Trigger wrapper that dogfoods the reusable backport workflow in THIS repo.
+# Downstream repos should copy examples/workflow-backport.yaml instead (it pins
+# a released @version of the reusable workflow).
+
+on:
+  # pull_request_target runs in the base-branch context with write access and
+  # secrets, and fires for labels added AFTER merge — both needed here. Safe for
+  # internal repos where PRs come from branches, not untrusted forks.
+  pull_request_target:
+    types: [closed, labeled]
+
+jobs:
+  backport:
+    # Only for MERGED PRs carrying at least one `backport <branch>` label —
+    # whether the label was added before merge (fires on `closed`) or after
+    # (fires on `labeled`).
+    if: >-
+      github.event.pull_request.merged == true &&
+      (
+        (github.event.action == 'labeled' && startsWith(github.event.label.name, 'backport ')) ||
+        (github.event.action == 'closed' && contains(join(github.event.pull_request.labels.*.name, '|'), 'backport '))
+      )
+    uses: ./.github/workflows/backport.yaml
+    with:
+      pr_number: ${{ github.event.pull_request.number }}
+    secrets:
+      # Optional — leave unset to fall back to GITHUB_TOKEN (no CI on backport PR).
+      APP_ID: ${{ secrets.BACKPORT_APP_ID }}
+      APP_PRIVATE_KEY: ${{ secrets.BACKPORT_APP_PRIVATE_KEY }}
+    permissions:
+      contents: write
+      pull-requests: write

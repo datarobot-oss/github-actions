@@ -1,0 +1,50 @@
+name: Backport
+
+# Drop-in backport automation. Copy to .github/workflows/ in your repo.
+#
+# Usage: on a MERGED PR, add a label `backport <branch>` (e.g. `backport release/12.0`).
+# A cherry-pick PR is opened against that branch. Add several labels to backport to
+# several branches at once. Works whether the label is added before or after merge.
+#
+# Bump @<version> to pick up new revisions of the reusable workflow.
+#
+# ─── REQUIRED LABELS (repo admin must create these in the repo) ───────────────
+#   `backport <branch>`   e.g. `backport release/12.0` — TRIGGER label a dev adds
+#                         by hand, so it MUST exist for them to pick it. Create one
+#                         per target branch you intend to support.
+#   `backported <branch>` e.g. `backported release/12.0` — added on success.
+#                         Auto-created by the API if missing, but pre-create it so
+#                         it has a sensible colour/description.
+#   `backport-failed`     — added when a cherry-pick conflicts. Auto-created if
+#                         missing; pre-create for colour/description.
+#   `do not merge`        — added to the BACKPORT PR when no GitHub App token is
+#                         configured (CI did not auto-run). Auto-created; pre-make
+#                         it red and, ideally, wire branch protection so a PR with
+#                         this label can't be merged.
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  pull_request_target:
+    types: [closed, labeled]
+
+jobs:
+  backport:
+    if: >-
+      github.event.pull_request.merged == true &&
+      (
+        (github.event.action == 'labeled' && startsWith(github.event.label.name, 'backport ')) ||
+        (github.event.action == 'closed' && contains(join(github.event.pull_request.labels.*.name, '|'), 'backport '))
+      )
+    uses: datarobot-oss/github-actions/.github/workflows/backport.yaml@0.0.10  # bump to the release that includes backport.yaml
+    with:
+      pr_number: ${{ github.event.pull_request.number }}
+    secrets:
+      # OPTIONAL. Provide these to open the backport PR via a GitHub App so CI runs
+      # on it automatically. Omit both to fall back to the built-in GITHUB_TOKEN
+      # (backport still works, but you'll need to push an empty commit / re-open the
+      # PR to trigger its checks). See BACKPORT.md for the one-time App setup.
+      APP_ID: ${{ secrets.BACKPORT_APP_ID }}
+      APP_PRIVATE_KEY: ${{ secrets.BACKPORT_APP_PRIVATE_KEY }}
+    permissions:
+      contents: write
+      pull-requests: write
