@@ -28,16 +28,47 @@ on:
     types: [closed, labeled]
 
 jobs:
-  backport:
+  # Decide which backport labels this run should act on (see notes below), then
+  # pass that to the reusable workflow as the korthout label_pattern. On merge
+  # (`closed`) we process every `backport <branch>` label present. On a later
+  # `labeled` event we scope to ONLY the triggering label's branch — otherwise
+  # korthout reprocesses every backport label each time a new one is added,
+  # re-attempting branches that were already backported (duplicate/failed reruns).
+  prepare:
     if: >-
       github.event.pull_request.merged == true &&
       (
         (github.event.action == 'labeled' && startsWith(github.event.label.name, 'backport ')) ||
         (github.event.action == 'closed' && contains(join(github.event.pull_request.labels.*.name, '|'), 'backport '))
       )
+    runs-on: ubuntu-latest
+    outputs:
+      label_pattern: ${{ steps.pattern.outputs.label_pattern }}
+    steps:
+      - name: Compute label pattern
+        id: pattern
+        env:
+          ACTION: ${{ github.event.action }}
+          LABEL_NAME: ${{ github.event.label.name }}
+        run: |
+          if [ "$ACTION" = "labeled" ]; then
+            # Restrict to just the triggering label's branch. Escape regex
+            # metacharacters that are legal in git branch names (e.g. the dot in
+            # release/12.0) so the branch matches literally and nothing else.
+            BRANCH=${LABEL_NAME#backport }
+            ESCAPED=$(printf '%s' "$BRANCH" | sed 's/[.$+(){}|]/\\&/g')
+            echo "label_pattern=^backport (${ESCAPED})\$" >> "$GITHUB_OUTPUT"
+          else
+            # Merge event: handle every backport label present on the PR at once.
+            echo 'label_pattern=^backport ([^ ]+)$' >> "$GITHUB_OUTPUT"
+          fi
+
+  backport:
+    needs: prepare
     uses: datarobot-oss/github-actions/.github/workflows/backport.yaml@0.0.10  # bump to the release that includes backport.yaml
     with:
       pr_number: ${{ github.event.pull_request.number }}
+      label_pattern: ${{ needs.prepare.outputs.label_pattern }}
     secrets:
       # OPTIONAL. Provide these to open the backport PR via a GitHub App so CI runs
       # on it automatically. Omit both to fall back to the built-in GITHUB_TOKEN
