@@ -1,0 +1,10 @@
+#!/usr/bin/env node
+// `git` stub. Only `git tag --list` is used by the release workflow; it prints
+// the newline-separated tag list from __GIT_TAGS. Any other git call fails loud.
+const args = process.argv.slice(2);
+if (args[0] === 'tag' && args.includes('--list')) {
+  process.stdout.write((process.env.__GIT_TAGS || '') + (process.env.__GIT_TAGS ? '\n' : ''));
+  process.exit(0);
+}
+process.stderr.write(`git stub: unexpected call: git ${args.join(' ')}\n`);
+process.exit(1);

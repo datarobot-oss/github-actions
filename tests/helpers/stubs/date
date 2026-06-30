@@ -1,0 +1,31 @@
+#!/usr/bin/env node
+// Portable `date` stub for the bash tests. Implements just what the workflows
+// use: `date -u +%s` (now) and `date -u -d <value> +%s` (parse a timestamp).
+// "now" is pinned via __NOW_EPOCH so waiting-time math is deterministic, and
+// `-d <iso>` works the same on macOS (BSD date) as on CI (GNU date).
+const args = process.argv.slice(2);
+let parseValue = null;
+for (let i = 0; i < args.length; i++) {
+  if (args[i] === '-d' || args[i] === '--date') parseValue = args[++i];
+}
+const wantsEpoch = args.some((a) => a === '+%s');
+
+let epoch;
+if (parseValue !== null) {
+  const ms = Date.parse(parseValue);
+  if (Number.isNaN(ms)) {
+    process.stderr.write(`date: invalid date '${parseValue}'\n`);
+    process.exit(1);
+  }
+  epoch = Math.floor(ms / 1000);
+} else {
+  epoch = process.env.__NOW_EPOCH
+    ? Number(process.env.__NOW_EPOCH)
+    : Math.floor(Date.now() / 1000);
+}
+
+if (wantsEpoch) {
+  process.stdout.write(`${epoch}\n`);
+} else {
+  process.stdout.write(`${new Date(epoch * 1000).toUTCString()}\n`);
+}

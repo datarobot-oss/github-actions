@@ -1,0 +1,37 @@
+name: Self-test
+
+# CI for THIS repo's own reusable workflows. Not a reusable workflow itself and
+# not consumed downstream — it lints every workflow and unit-tests the bash /
+# github-script logic embedded in them, so changes can be validated on the PR
+# before a release tag is cut.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  actionlint:
+    name: Lint workflows
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      # Bundles shellcheck, so inline `run:` scripts are shellchecked too.
+      # Pinned so a new actionlint release can't fail CI without a deliberate bump.
+      - uses: docker://rhysd/actionlint:1.7.12
+        with:
+          args: -color
+
+  unit-tests:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+      - run: npm test
