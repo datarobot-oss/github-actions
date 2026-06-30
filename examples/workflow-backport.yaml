@@ -17,6 +17,10 @@ name: Backport
 #                         it has a sensible colour/description.
 #   `backport-failed`     — added when a cherry-pick conflicts. Auto-created if
 #                         missing; pre-create for colour/description.
+#   `do not merge`        — added to the BACKPORT PR when no GitHub App token is
+#                         configured (CI did not auto-run). Auto-created; pre-make
+#                         it red and, ideally, wire branch protection so a PR with
+#                         this label can't be merged.
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:

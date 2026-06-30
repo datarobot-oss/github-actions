@@ -60,6 +60,22 @@ token**:
 | **GitHub App** (secrets present) | ✅ yes | one-time org App + 2 secrets |
 | `GITHUB_TOKEN` fallback (no secrets) | ❌ no — push empty commit / re-open to kick CI | none |
 
+In the fallback case the workflow makes the gap loud: each backport PR gets a
+**`do not merge`** label and a comment explaining that CI didn't run and exactly
+how to kick it:
+
+```bash
+git fetch origin
+git checkout <backport-branch>
+git commit --allow-empty -m "ci: trigger checks"
+git push
+```
+
+The empty commit fires a `pull_request: synchronize` event, which standard CI
+runs on. When checks pass, remove the `do not merge` label and merge. Consider
+adding a branch-protection rule so a PR carrying `do not merge` can't be merged
+at all.
+
 The fallback needs **zero setup**, so you can adopt this today and flip on App-based
 CI later **just by adding the two secrets** — no workflow change in any repo.
 

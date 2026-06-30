@@ -86,12 +86,16 @@ jobs:
           PR_NUMBER: ${{ inputs.pr_number }}
           BY_TARGET: ${{ steps.backport.outputs.was_successful_by_target }}
           CREATED: ${{ steps.backport.outputs.created_pull_numbers }}
+          APP_TOKEN_USED: ${{ env.HAS_APP_CREDS }}
         with:
           github-token: ${{ steps.app-token.outputs.token || github.token }}
           script: |
+            const { owner, repo } = context.repo;
             const prNumber = Number(process.env.PR_NUMBER);
             const byTarget = (process.env.BY_TARGET || '').trim();
             const created = (process.env.CREATED || '').trim();
+            const appTokenUsed = process.env.APP_TOKEN_USED === 'true';
+            const createdNumbers = created.split(/\s+/).filter(Boolean).map(Number);
 
             // korthout emits one `branch=true|false` line per target label.
             const succeeded = [];
@@ -137,9 +141,50 @@ jobs:
             }
             if (lines.length) {
               await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
+                owner,
+                repo,
                 issue_number: prNumber,
                 body: lines.join('\n'),
               });
+            }
+
+            // When the App token wasn't configured, the backport PRs were opened
+            // with GITHUB_TOKEN, so CI did NOT auto-run on them. Block merge and
+            // tell the author how to kick the checks manually.
+            if (!appTokenUsed && createdNumbers.length) {
+              for (const n of createdNumbers) {
+                let branch = '<backport-branch>';
+                try {
+                  const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: n });
+                  branch = pr.head.ref;
+                } catch (e) {
+                  console.log(`Could not read head ref for #${n}: ${e.message}`);
+                }
+                // addLabels auto-creates the label if it doesn't exist yet.
+                await github.rest.issues.addLabels({
+                  owner, repo, issue_number: n, labels: ['do not merge'],
+                });
+                const body = [
+                  '⛔ **Do not merge yet — CI has not run on this backport.**',
+                  '',
+                  'This PR was opened with the built-in `GITHUB_TOKEN`. GitHub does not trigger',
+                  'workflows for PRs created by `GITHUB_TOKEN`, so the usual checks have **not** run,',
+                  'and the **`do not merge`** label has been applied.',
+                  '',
+                  '**To run the checks**, push an empty commit to this branch:',
+                  '```bash',
+                  'git fetch origin',
+                  `git checkout ${branch}`,
+                  'git commit --allow-empty -m "ci: trigger checks"',
+                  'git push',
+                  '```',
+                  'That fires a `pull_request: synchronize` event, which standard CI runs on.',
+                  '(If this repo\'s workflows also run on `reopened`, closing and re-opening the PR works too.)',
+                  '',
+                  'When the checks pass, remove the **`do not merge`** label and merge.',
+                  '',
+                  '_To make CI run automatically on future backports, configure the backport GitHub App — see `BACKPORT.md`._',
+                ].join('\n');
+                await github.rest.issues.createComment({ owner, repo, issue_number: n, body });
+              }
             }
