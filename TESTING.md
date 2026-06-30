@@ -15,7 +15,8 @@ locally via [`go-task`](https://taskfile.dev):
 | **bash tests** | The `run:` shell blocks (`tests/scripts-bash.test.mjs`) | `task test` |
 
 ```bash
-task          # lint + test (everything CI runs)
+task          # list available tasks
+task ci       # lint + test (everything CI runs)
 task lint     # actionlint + shellcheck via Docker (matches CI exactly)
 task test     # node unit tests
 ```

@@ -6,6 +6,12 @@ version: '3'
 
 tasks:
   default:
+    desc: Show available tasks
+    cmds:
+      - task --list
+    silent: true
+
+  ci:
     desc: Run everything CI runs (lint + tests)
     cmds:
       - task: lint
