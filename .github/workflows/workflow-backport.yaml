@@ -12,7 +12,13 @@ on:
     types: [closed, labeled]
 
 jobs:
-  backport:
+  # Decide which backport labels this run should act on, then pass that as the
+  # korthout label_pattern. On merge (`closed`) we process every `backport
+  # <branch>` label present at that moment. On a later `labeled` event we scope
+  # korthout to ONLY the triggering label's branch — otherwise korthout
+  # reprocesses every backport label on the PR each time a new one is added,
+  # re-attempting branches that were already backported (duplicate/failed reruns).
+  prepare:
     # Only for MERGED PRs carrying at least one `backport <branch>` label —
     # whether the label was added before merge (fires on `closed`) or after
     # (fires on `labeled`).
@@ -22,9 +28,34 @@ jobs:
         (github.event.action == 'labeled' && startsWith(github.event.label.name, 'backport ')) ||
         (github.event.action == 'closed' && contains(join(github.event.pull_request.labels.*.name, '|'), 'backport '))
       )
+    runs-on: ubuntu-latest
+    outputs:
+      label_pattern: ${{ steps.pattern.outputs.label_pattern }}
+    steps:
+      - name: Compute label pattern
+        id: pattern
+        env:
+          ACTION: ${{ github.event.action }}
+          LABEL_NAME: ${{ github.event.label.name }}
+        run: |
+          if [ "$ACTION" = "labeled" ]; then
+            # Restrict to just the triggering label's branch. Escape regex
+            # metacharacters that are legal in git branch names (e.g. the dot in
+            # release/12.0) so the branch matches literally and nothing else.
+            BRANCH=${LABEL_NAME#backport }
+            ESCAPED=$(printf '%s' "$BRANCH" | sed 's/[.$+(){}|]/\\&/g')
+            echo "label_pattern=^backport (${ESCAPED})\$" >> "$GITHUB_OUTPUT"
+          else
+            # Merge event: handle every backport label present on the PR at once.
+            echo 'label_pattern=^backport ([^ ]+)$' >> "$GITHUB_OUTPUT"
+          fi
+
+  backport:
+    needs: prepare
     uses: ./.github/workflows/backport.yaml
     with:
       pr_number: ${{ github.event.pull_request.number }}
+      label_pattern: ${{ needs.prepare.outputs.label_pattern }}
     secrets:
       # Optional — leave unset to fall back to GITHUB_TOKEN (no CI on backport PR).
       APP_ID: ${{ secrets.BACKPORT_APP_ID }}

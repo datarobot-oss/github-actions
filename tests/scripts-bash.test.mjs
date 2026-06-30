@@ -173,6 +173,43 @@ test('notify-slack: build-pr-list skips approved PRs and computes waiting time',
   assert.match(records[0].waiting, /waiting 1d 0h/);
 });
 
+// --------------------------------------------------------------------------
+// workflow-backport.yaml — "Compute label pattern"
+// Scopes korthout to the triggering label on `labeled` events so it doesn't
+// reprocess already-backported branches; uses the catch-all on merge.
+// --------------------------------------------------------------------------
+function computePattern(env) {
+  const script = runScript(loadWorkflow('workflow-backport'), { id: 'pattern' });
+  return runBash(script, { env });
+}
+
+test('backport pattern: merge (closed) event uses the catch-all pattern', () => {
+  const r = computePattern({ ACTION: 'closed', LABEL_NAME: '' });
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(r.outputs['label_pattern'], '^backport ([^ ]+)$');
+});
+
+test('backport pattern: labeled event scopes to only the triggering branch', () => {
+  const r = computePattern({ ACTION: 'labeled', LABEL_NAME: 'backport release/12.0' });
+  assert.equal(r.code, 0, r.stderr);
+  const pattern = r.outputs['label_pattern'];
+  assert.equal(pattern, '^backport (release/12\\.0)$');
+
+  // The whole point: the scoped regex matches its own label and NOT the other
+  // backport labels that may sit on the same PR.
+  const re = new RegExp(pattern);
+  assert.match('backport release/12.0', re);
+  assert.doesNotMatch('backport release/11.0', re, 'must not re-trigger other branches');
+  assert.doesNotMatch('backport release/12X0', re, 'escaped dot is literal, not a wildcard');
+  // Capture group yields the branch korthout backports to.
+  assert.equal('backport release/12.0'.match(re)[1], 'release/12.0');
+});
+
+test('backport pattern: plain branch name needs no escaping', () => {
+  const r = computePattern({ ACTION: 'labeled', LABEL_NAME: 'backport main' });
+  assert.equal(r.outputs['label_pattern'], '^backport (main)$');
+});
+
 test('notify-slack: approved PR with a pending re-review request is re-surfaced', () => {
   const script = runScript(loadWorkflow('notify-slack'), { id: 'build-pr-list' });
   const now = sec('2026-06-30T00:00:00Z');
