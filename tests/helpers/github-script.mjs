@@ -16,6 +16,11 @@ export function makeGithub(responses = {}) {
     'rest.issues.createComment': { data: { id: 1 } },
     'rest.issues.updateComment': { data: { id: 1 } },
     'rest.issues.addLabels': { data: [] },
+    'rest.issues.listLabelsForRepo': { data: [] },
+    'rest.issues.createLabel': { data: {} },
+    'rest.issues.updateLabel': { data: {} },
+    'rest.issues.deleteLabel': { data: {} },
+    'rest.issues.listForRepo': { data: [] },
     'rest.pulls.get': { data: { head: { ref: 'unknown' } } },
   };
   const make = (key) =>
@@ -27,12 +32,23 @@ export function makeGithub(responses = {}) {
   const client = {
     calls,
     callsTo: (key) => calls.filter((c) => c.method === key),
+    // Fake octokit paginate: our stubbed methods return a single page, so just
+    // run the method and hand back its item array (unwrapping `{ data }`).
+    paginate: async (method, params) => {
+      const r = await method(params);
+      return Array.isArray(r) ? r : (r?.data ?? []);
+    },
     rest: {
       issues: {
         listComments: make('rest.issues.listComments'),
         createComment: make('rest.issues.createComment'),
         updateComment: make('rest.issues.updateComment'),
         addLabels: make('rest.issues.addLabels'),
+        listLabelsForRepo: make('rest.issues.listLabelsForRepo'),
+        createLabel: make('rest.issues.createLabel'),
+        updateLabel: make('rest.issues.updateLabel'),
+        deleteLabel: make('rest.issues.deleteLabel'),
+        listForRepo: make('rest.issues.listForRepo'),
       },
       pulls: {
         get: make('rest.pulls.get'),

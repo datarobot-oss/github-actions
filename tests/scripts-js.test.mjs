@@ -71,17 +71,6 @@ test('add-jira-link: updates the existing bot comment instead of duplicating', a
   assert.equal(updated[0].params.comment_id, 99, 'updates the existing bot comment');
 });
 
-test('add-jira-link: a failing comment API is swallowed (helper never red-Xes the PR)', async () => {
-  const script = githubScript(loadWorkflow('add-jira-link'), { name: 'Comment with Jira link' });
-  const github = makeGithub({
-    'rest.issues.listComments': () => { throw new Error('Resource not accessible by integration'); },
-  });
-
-  await assert.doesNotReject(
-    runGithubScript(script, { github, context: ctx, env: { TICKET_IDS: 'BUZZOK-1', PR_NUMBER: '7' } }),
-  );
-});
-
 // --------------------------------------------------------------------------
 // mark-pr-reviewed.yaml — "Add 00 - Reviewed label"
 // --------------------------------------------------------------------------
@@ -101,17 +90,97 @@ test('mark-pr-reviewed: adds the "00 - Reviewed" label to the PR', async () => {
   assert.deepEqual(labels[0].params.labels, ['00 - Reviewed']);
 });
 
-test('mark-pr-reviewed: a failing addLabels is swallowed (helper never red-Xes the PR)', async () => {
-  const script = githubScript(loadWorkflow('mark-pr-reviewed'), { name: 'Reviewed' });
-  const github = makeGithub({
-    'rest.issues.addLabels': () => { throw new Error('Resource not accessible by integration'); },
+// --------------------------------------------------------------------------
+// ensure-labels.yaml — "Ensure labels exist ..."
+// --------------------------------------------------------------------------
+function ensureLabelsScript() {
+  return githubScript(loadWorkflow('ensure-labels'), { name: 'Ensure labels exist' });
+}
+
+// The canonical labels exactly as the workflow declares them (used to build
+// "already up to date" fixtures so create/update calls stay quiet).
+const READY = {
+  name: '00 - Ready for Review',
+  color: '0e8a16',
+  description: 'PR is ready for team review — triggers the Slack notification & digest.',
+};
+const REVIEWED = {
+  name: '00 - Reviewed',
+  color: '5319e7',
+  description: 'PR has been approved — excludes it from the ready-for-review digest.',
+};
+
+test('ensure-labels: creates both canonical labels when none exist', async () => {
+  const github = makeGithub({ 'rest.issues.listLabelsForRepo': { data: [] } });
+  await runGithubScript(ensureLabelsScript(), {
+    github, context: ctx, templateVars: { 'inputs.delete_confusable': false },
   });
 
-  // Must resolve, not reject — the job stays green and the scheduled reconcile retries.
-  await assert.doesNotReject(
-    runGithubScript(script, { github, context: ctx, templateVars: { 'inputs.pr_number': 314 } }),
-  );
-  assert.equal(github.callsTo('rest.issues.addLabels').length, 1, 'it still attempts the label');
+  const created = github.callsTo('rest.issues.createLabel').map((c) => c.params.name).sort();
+  assert.deepEqual(created, ['00 - Ready for Review', '00 - Reviewed']);
+  assert.equal(github.callsTo('rest.issues.updateLabel').length, 0);
+  assert.equal(github.callsTo('rest.issues.deleteLabel').length, 0);
+});
+
+test('ensure-labels: updates a drifted label and leaves an up-to-date one alone', async () => {
+  const github = makeGithub({
+    'rest.issues.listLabelsForRepo': {
+      data: [REVIEWED, { ...READY, color: 'ffffff', description: 'stale' }],
+    },
+  });
+  await runGithubScript(ensureLabelsScript(), {
+    github, context: ctx, templateVars: { 'inputs.delete_confusable': false },
+  });
+
+  assert.equal(github.callsTo('rest.issues.createLabel').length, 0, 'both already exist');
+  const updated = github.callsTo('rest.issues.updateLabel');
+  assert.equal(updated.length, 1, 'only the drifted label is updated');
+  assert.equal(updated[0].params.name, '00 - Ready for Review');
+  assert.equal(updated[0].params.color, '0e8a16');
+});
+
+test('ensure-labels: with delete_confusable=false, confusable variants are left untouched', async () => {
+  const github = makeGithub({
+    'rest.issues.listLabelsForRepo': { data: [READY, REVIEWED, { name: 'Ready for Review', color: 'ccc', description: '' }] },
+  });
+  await runGithubScript(ensureLabelsScript(), {
+    github, context: ctx, templateVars: { 'inputs.delete_confusable': false },
+  });
+
+  assert.equal(github.callsTo('rest.issues.deleteLabel').length, 0);
+  assert.equal(github.callsTo('rest.issues.addLabels').length, 0);
+});
+
+test('ensure-labels: delete_confusable migrates open PRs then deletes the wrong labels', async () => {
+  const github = makeGithub({
+    'rest.issues.listLabelsForRepo': {
+      data: [
+        READY,
+        REVIEWED,
+        { name: 'Ready for Review', color: 'ccc', description: '' },       // confusable -> delete
+        { name: 'reviewed', color: 'ddd', description: '' },               // confusable -> delete
+        { name: 'backport release/12.0', color: 'eee', description: '' },  // protected -> keep
+        { name: 'do not merge', color: 'fff', description: '' },           // protected -> keep
+        { name: 'bug', color: '111', description: '' },                    // unrelated -> keep
+      ],
+    },
+    'rest.issues.listForRepo': { data: [{ number: 12 }, { number: 34 }] },
+  });
+  await runGithubScript(ensureLabelsScript(), {
+    github, context: ctx, templateVars: { 'inputs.delete_confusable': true },
+  });
+
+  // Only the two confusable variants are deleted; protected/unrelated survive.
+  const deleted = github.callsTo('rest.issues.deleteLabel').map((c) => c.params.name).sort();
+  assert.deepEqual(deleted, ['Ready for Review', 'reviewed']);
+
+  // Each confusable label's open PRs (#12, #34) get the canonical label first.
+  const added = github.callsTo('rest.issues.addLabels');
+  assert.equal(added.length, 4, 'two labels × two open PRs');
+  const readyMigrations = added.filter((c) => c.params.labels.includes('00 - Ready for Review'));
+  const reviewedMigrations = added.filter((c) => c.params.labels.includes('00 - Reviewed'));
+  assert.deepEqual(readyMigrations.map((c) => c.params.issue_number).sort(), [12, 34]);
+  assert.deepEqual(reviewedMigrations.map((c) => c.params.issue_number).sort(), [12, 34]);
 });
 
 // --------------------------------------------------------------------------

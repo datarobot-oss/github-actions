@@ -29,6 +29,11 @@ Copy example workflows from the `examples` directory to your `.github/workflows`
 to new revisions. The examples should be drop in and go. You make need to add the appropriate `SECRET` keys to your repo such as:
 - `SLACK_WEBHOOK_URL` (receive slack notifications in the specified channel)
 
+If you use the PR-automation workflow, also copy `examples/workflow-ensure-labels.yaml` and run it once from the Actions tab. It creates the labels
+the automation depends on (`00 - Ready for Review`, `00 - Reviewed`); after that the helper jobs assume those labels exist. It has an optional
+destructive mode that cleans up confusable label variants (e.g. `Ready for Review` without the `00 - ` prefix), migrating any open PRs to the
+canonical label first.
+
 
 # Contributing & testing
 

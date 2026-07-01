@@ -91,9 +91,6 @@ jobs:
               }]
             }')
 
-          # Helper utility: a failed Slack ping must never red-X the PR.
-          if ! curl -fsS -X POST -H 'Content-type: application/json' \
+          curl -fsS -X POST -H 'Content-type: application/json' \
             --data "$PAYLOAD" \
-            "$SLACK_WEBHOOK_URL" >/dev/null; then
-            echo "::warning::Slack notification failed for PR #$PR_NR (non-blocking helper)"
-          fi
+            "$SLACK_WEBHOOK_URL" >/dev/null
