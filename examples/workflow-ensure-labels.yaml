@@ -12,6 +12,7 @@ name: Ensure PR-automation labels
 #   (+ `backport <branch>` / `backported <branch>` for any branches you pass).
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Triggered by: manual dispatch only (run from the Actions tab).
 on:
   workflow_dispatch:
     inputs:
@@ -27,8 +28,10 @@ on:
         type: boolean
 
 jobs:
+  # Create/repair the automation labels (idempotent); optionally add per-branch
+  # backport labels and clean up confusable review-label variants.
   ensure-labels:
-    uses: datarobot-oss/github-actions/.github/workflows/ensure-labels.yaml@0.0.15  # bump to the release that includes ensure-labels.yaml
+    uses: datarobot-oss/github-actions/.github/workflows/ensure-labels.yaml@0.0.15
     with:
       backport_branches: ${{ inputs.backport_branches }}
       delete_confusable: ${{ inputs.delete_confusable }}

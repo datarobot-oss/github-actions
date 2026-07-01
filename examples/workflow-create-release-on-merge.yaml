@@ -8,6 +8,7 @@ name: Create Release on Merge to Main
 # - None.
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Triggered by: every push to main (i.e. a merged PR).
 on:
   push:
     branches: ["main"]
@@ -17,8 +18,9 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Tag the next patch version and cut a GitHub release.
   release:
-    uses: datarobot-oss/github-actions/.github/workflows/create-release-on-merge.yaml@0.0.15  # bump to the release that includes create-release-on-merge.yaml
+    uses: datarobot-oss/github-actions/.github/workflows/create-release-on-merge.yaml@0.0.15
     permissions:
       contents: write
       pull-requests: read
