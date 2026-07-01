@@ -71,6 +71,17 @@ test('add-jira-link: updates the existing bot comment instead of duplicating', a
   assert.equal(updated[0].params.comment_id, 99, 'updates the existing bot comment');
 });
 
+test('add-jira-link: a failing comment API is swallowed (helper never red-Xes the PR)', async () => {
+  const script = githubScript(loadWorkflow('add-jira-link'), { name: 'Comment with Jira link' });
+  const github = makeGithub({
+    'rest.issues.listComments': () => { throw new Error('Resource not accessible by integration'); },
+  });
+
+  await assert.doesNotReject(
+    runGithubScript(script, { github, context: ctx, env: { TICKET_IDS: 'BUZZOK-1', PR_NUMBER: '7' } }),
+  );
+});
+
 // --------------------------------------------------------------------------
 // mark-pr-reviewed.yaml — "Add 00 - Reviewed label"
 // --------------------------------------------------------------------------
@@ -88,6 +99,19 @@ test('mark-pr-reviewed: adds the "00 - Reviewed" label to the PR', async () => {
   assert.equal(labels.length, 1);
   assert.equal(labels[0].params.issue_number, 314);
   assert.deepEqual(labels[0].params.labels, ['00 - Reviewed']);
+});
+
+test('mark-pr-reviewed: a failing addLabels is swallowed (helper never red-Xes the PR)', async () => {
+  const script = githubScript(loadWorkflow('mark-pr-reviewed'), { name: 'Reviewed' });
+  const github = makeGithub({
+    'rest.issues.addLabels': () => { throw new Error('Resource not accessible by integration'); },
+  });
+
+  // Must resolve, not reject — the job stays green and the scheduled reconcile retries.
+  await assert.doesNotReject(
+    runGithubScript(script, { github, context: ctx, templateVars: { 'inputs.pr_number': 314 } }),
+  );
+  assert.equal(github.callsTo('rest.issues.addLabels').length, 1, 'it still attempts the label');
 });
 
 // --------------------------------------------------------------------------

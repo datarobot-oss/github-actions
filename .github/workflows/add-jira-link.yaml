@@ -59,34 +59,40 @@ jobs:
             const body = ticketIds.length === 1 ? links[0] : links.map(l => `- ${l}`).join('\n');
             const commentBody = `${header}\n\n${body}`;
 
-            // Check if we already commented
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: issueNumber,
-            });
-
-            const botComment = comments.find(comment =>
-              comment.user.type === 'Bot' &&
-              comment.body.includes('🎫 Jira Ticket')
-            );
-
-            if (botComment) {
-              // Update existing comment
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: botComment.id,
-                body: commentBody
-              });
-              console.log('Updated existing Jira link comment');
-            } else {
-              // Create new comment
-              await github.rest.issues.createComment({
+            // Helper utility: posting the link must never turn a PR check red.
+            // On any API failure we downgrade to a warning instead of failing.
+            try {
+              // Check if we already commented
+              const { data: comments } = await github.rest.issues.listComments({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: issueNumber,
-                body: commentBody
               });
-              console.log('Created new Jira link comment');
+
+              const botComment = comments.find(comment =>
+                comment.user.type === 'Bot' &&
+                comment.body.includes('🎫 Jira Ticket')
+              );
+
+              if (botComment) {
+                // Update existing comment
+                await github.rest.issues.updateComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: botComment.id,
+                  body: commentBody
+                });
+                console.log('Updated existing Jira link comment');
+              } else {
+                // Create new comment
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNumber,
+                  body: commentBody
+                });
+                console.log('Created new Jira link comment');
+              }
+            } catch (err) {
+              core.warning(`Could not post the Jira link comment to PR #${issueNumber}: ${err.message}`);
             }

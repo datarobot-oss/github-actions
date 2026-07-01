@@ -19,9 +19,20 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            await github.rest.issues.addLabels({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: ${{ inputs.pr_number }},
-              labels: ['00 - Reviewed']
-            });
+            // This is a helper utility — it must never turn a PR check red.
+            // GitHub intermittently fails to dispatch the pull_request_review
+            // run at all, and labels/perms can be off in a consumer repo. On any
+            // failure we downgrade to a warning; the scheduled notify-slack job
+            // reconciles the label on its next pass (every 30 min).
+            const prNumber = ${{ inputs.pr_number }};
+            try {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                labels: ['00 - Reviewed']
+              });
+              core.info(`Added "00 - Reviewed" to PR #${prNumber}`);
+            } catch (err) {
+              core.warning(`Could not add "00 - Reviewed" to PR #${prNumber}: ${err.message}. The scheduled reconcile will retry.`);
+            }

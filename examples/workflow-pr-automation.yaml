@@ -83,4 +83,6 @@ jobs:
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
     permissions:
       contents: read
-      pull-requests: read
+      # write so the digest can reconcile a missing "00 - Reviewed" label when
+      # GitHub never dispatched the event-driven mark-reviewed run.
+      pull-requests: write
