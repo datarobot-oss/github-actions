@@ -14,6 +14,9 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/datarobot-oss/github-actions/actions/workflows/self-test.yaml">
+    <img src="https://github.com/datarobot-oss/github-actions/actions/workflows/self-test.yaml/badge.svg" alt="Tests">
+  </a>
   <a href="https://github.com/datarobot-oss/github-actions/tags">
     <img src="https://img.shields.io/github/v/tag/datarobot-oss/github-actions?label=version" alt="Latest Release">
   </a>
