@@ -17,7 +17,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read
+      # write (not read) so the digest can reconcile a missing "00 - Reviewed"
+      # label when the event-driven mark-reviewed run was never dispatched.
+      pull-requests: write
       checks: read
 
     steps:
@@ -75,7 +77,19 @@ jobs:
             HAS_PENDING_REVIEW_REQUEST=$(echo "$PR_DETAIL" | jq '.requested_reviewers | length > 0')
 
             if [ "$HAS_APPROVAL" = "true" ] && [ "$HAS_PENDING_REVIEW_REQUEST" = "false" ]; then
-              echo "Skipping PR #$PR_NUMBER - approved with no pending re-review requests"
+              # This PR is approved and done, yet it still reached this loop —
+              # which means it carries a "ready for review" label and lacks
+              # "00 - Reviewed" (the fetch step drops already-reviewed PRs). The
+              # event-driven mark-reviewed job must have missed its webhook, so
+              # heal the label here. This is the safety net for GitHub silently
+              # not dispatching pull_request_review runs.
+              echo "PR #$PR_NUMBER approved but unlabeled - reconciling '00 - Reviewed'"
+              curl -fsS -X POST \
+                -H "Authorization: token $GH_TOKEN" \
+                -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/repos/${REPO_NAME}/issues/${PR_NUMBER}/labels" \
+                -d '{"labels":["00 - Reviewed"]}' >/dev/null
+              echo "Reconciled '00 - Reviewed' on PR #$PR_NUMBER"
               continue
             fi
             # Find when the "ready for review" label was most recently applied.
@@ -168,6 +182,6 @@ jobs:
               }]
             }')
 
-          curl -X POST -H 'Content-type: application/json' \
+          curl -fsS -X POST -H 'Content-type: application/json' \
             --data "$PAYLOAD" \
-            "$SLACK_WEBHOOK_URL"
+            "$SLACK_WEBHOOK_URL" >/dev/null

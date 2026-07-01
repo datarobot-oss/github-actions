@@ -1,0 +1,30 @@
+name: Ensure PR-automation labels
+
+# Manual, run-once (or run-whenever) setup for the labels the PR-automation
+# workflows depend on. Trigger it from the Actions tab after adding the
+# automation to a repo — it creates `00 - Ready for Review` and `00 - Reviewed`
+# with consistent colour/description so the helper jobs never fail on a missing
+# label. Safe to re-run: it's idempotent.
+#
+# Tick "Delete confusable label variants" to also clean up wrong labels people
+# applied by accident (e.g. `Ready for Review` without the `00 - ` prefix). Open
+# PRs carrying the wrong label are migrated to the canonical one before it's
+# deleted, so nothing drops out of the review funnel.
+
+on:
+  workflow_dispatch:
+    inputs:
+      delete_confusable:
+        description: 'Delete confusable label variants (migrates open PRs first)'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  ensure-labels:
+    uses: datarobot-oss/github-actions/.github/workflows/ensure-labels.yaml@0.0.13  # bump to the release that includes ensure-labels.yaml
+    with:
+      delete_confusable: ${{ inputs.delete_confusable }}
+    permissions:
+      issues: write
+      pull-requests: write

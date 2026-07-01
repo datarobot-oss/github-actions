@@ -210,6 +210,29 @@ test('backport pattern: plain branch name needs no escaping', () => {
   assert.equal(r.outputs['label_pattern'], '^backport (main)$');
 });
 
+test('notify-slack: reconciles a missing "00 - Reviewed" label on an approved+done PR', () => {
+  const script = runScript(loadWorkflow('notify-slack'), { id: 'build-pr-list' });
+  const now = sec('2026-06-30T00:00:00Z');
+  const fixtures = [
+    // Approved, no pending re-review -> excluded from the digest. It only
+    // reached this loop because the event-driven mark-reviewed never fired,
+    // so the digest must heal the label itself.
+    { match: 'pulls/2/reviews', body: [{ state: 'APPROVED', user: { login: 'bob' }, submitted_at: '2026-06-01T00:00:00Z' }] },
+    { match: 'pulls/2', body: { number: 2, title: 'B', head: { sha: 'sha2' }, requested_reviewers: [] } },
+  ];
+  const r = runBash(script, {
+    env: { GH_TOKEN: 'x', REPO_NAME: 'org/repo', PR_NUMBERS: '2' },
+    now,
+    curlFixtures: fixtures,
+  });
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(JSON.parse(r.exportedEnv.PR_RECORDS), [], 'approved PR stays out of the digest');
+
+  const labelPost = r.posts.find((p) => p.url.includes('/issues/2/labels'));
+  assert.ok(labelPost, 'posts a label-reconcile request to the labels endpoint');
+  assert.deepEqual(JSON.parse(labelPost.data), { labels: ['00 - Reviewed'] });
+});
+
 test('notify-slack: approved PR with a pending re-review request is re-surfaced', () => {
   const script = runScript(loadWorkflow('notify-slack'), { id: 'build-pr-list' });
   const now = sec('2026-06-30T00:00:00Z');

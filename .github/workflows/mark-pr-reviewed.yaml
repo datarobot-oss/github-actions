@@ -19,6 +19,9 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
+            // Labels are guaranteed to exist by the ensure-labels workflow, so a
+            // failure here is a real problem (perms/config) and should surface as
+            // a red check rather than be swallowed.
             await github.rest.issues.addLabels({
               owner: context.repo.owner,
               repo: context.repo.repo,

@@ -1,0 +1,120 @@
+name: Ensure PR-automation labels
+
+# Idempotent setup for the labels this repo's PR-automation workflows depend on.
+# Run it once (manually) after wiring up the automation and the repo is good to
+# go — the labels exist with consistent colour/description, so the helper jobs
+# never fail on a missing label.
+#
+# Backport/release labels (`backport …`, `backported …`, `backport-failed`,
+# `do not merge`, `release/*`) are intentionally NOT managed here: the backport
+# flow creates those on demand and they vary per release branch.
+
+on:
+  workflow_call:
+    inputs:
+      delete_confusable:
+        description: >-
+          Destructive cleanup. When true, any label that is a "confusable"
+          variant of a canonical label (e.g. `Ready for Review` vs the canonical
+          `00 - Ready for Review`) is removed. Open PRs carrying the wrong label
+          are first migrated to the canonical one so they stay in the funnel.
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  ensure-labels:
+    runs-on: ubuntu-latest
+    permissions:
+      # write: create/update/delete repo labels and (during cleanup) add the
+      # canonical label to PRs that carried a confusable variant.
+      issues: write
+      pull-requests: write
+
+    steps:
+      - name: Ensure labels exist (and optionally clean up confusable variants)
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            // Canonical PR-automation labels this repo's reusable workflows rely
+            // on. The "00 - " prefix sorts them to the top of the label picker so
+            // devs grab the right one. Each carries a `confusable` regex matching
+            // the accidental variants people apply instead — anchored so the two
+            // canonical labels can never match each other's pattern.
+            const CANONICAL = [
+              {
+                name: '00 - Ready for Review',
+                color: '0e8a16',
+                description: 'PR is ready for team review — triggers the Slack notification & digest.',
+                confusable: /^(\d+\s*-\s*)?ready[ _-]*for[ _-]*review$/i,
+              },
+              {
+                name: '00 - Reviewed',
+                color: '5319e7',
+                description: 'PR has been approved — excludes it from the ready-for-review digest.',
+                confusable: /^(\d+\s*-\s*)?reviewed$/i,
+              },
+            ];
+
+            // Never delete these even if a confusable pattern somehow matched —
+            // the backport/release flow owns them.
+            const PROTECTED = /^(backport\b|backported\b|backport-failed$|do not merge$|release\/)/i;
+
+            const deleteConfusable = ${{ inputs.delete_confusable }};
+            const { owner, repo } = context.repo;
+
+            // 1. Snapshot every existing repo label.
+            const existing = await github.paginate(github.rest.issues.listLabelsForRepo, {
+              owner, repo, per_page: 100,
+            });
+            const byName = new Map(existing.map(l => [l.name, l]));
+
+            // 2. Create each canonical label, or align its colour/description.
+            for (const label of CANONICAL) {
+              const current = byName.get(label.name);
+              if (!current) {
+                await github.rest.issues.createLabel({
+                  owner, repo, name: label.name, color: label.color, description: label.description,
+                });
+                core.info(`Created label "${label.name}"`);
+              } else if (current.color !== label.color || (current.description || '') !== label.description) {
+                await github.rest.issues.updateLabel({
+                  owner, repo, name: label.name, color: label.color, description: label.description,
+                });
+                core.info(`Updated label "${label.name}" (colour/description)`);
+              } else {
+                core.info(`Label "${label.name}" already up to date`);
+              }
+            }
+
+            // 3. Optional destructive cleanup of confusable variants.
+            if (!deleteConfusable) {
+              core.info('delete_confusable=false — skipping cleanup of confusable labels.');
+              return;
+            }
+
+            for (const { name } of existing) {
+              if (CANONICAL.some(c => c.name === name)) continue; // keep the canonical labels
+              if (PROTECTED.test(name)) continue;                 // never touch backport/release labels
+              const canonical = CANONICAL.find(c => c.confusable.test(name));
+              if (!canonical) continue;
+
+              core.warning(`Confusable label "${name}" → migrating open PRs to "${canonical.name}", then deleting it.`);
+
+              // Migrate: add the canonical label to every open PR/issue carrying
+              // the wrong one, so nothing drops out of the review funnel.
+              const issues = await github.paginate(github.rest.issues.listForRepo, {
+                owner, repo, state: 'open', labels: name, per_page: 100,
+              });
+              for (const issue of issues) {
+                await github.rest.issues.addLabels({
+                  owner, repo, issue_number: issue.number, labels: [canonical.name],
+                });
+                core.info(`  #${issue.number}: added "${canonical.name}"`);
+              }
+
+              // Delete the confusable label (removes it from everything at once).
+              await github.rest.issues.deleteLabel({ owner, repo, name });
+              core.info(`  deleted label "${name}"`);
+            }
