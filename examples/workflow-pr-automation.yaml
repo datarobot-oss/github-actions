@@ -1,16 +1,14 @@
 name: PR Automation
 
-# ─── REQUIRED LABELS ──────────────────────────────────────────────────────────
-# These jobs assume the automation labels already exist. Run the companion
-# "Ensure PR-automation labels" workflow (examples/workflow-ensure-labels.yaml)
-# once to create them; after that the helper jobs hard-fail (red X) if a label
-# is missing, which correctly signals a setup problem rather than hiding it.
-#
-#   `00 - Ready for Review`   — TRIGGER (devs apply by hand) for
-#                               notify-ready-for-review + the Slack digest.
-#   `00 - Reviewed`           — applied on approval; also excludes a PR from the
-#                               Slack digest.
-# (add-jira-link and notify-slack-scheduled need no labels of their own.)
+# ─────────────────────────────────────────────────────────────────────────────
+# PR Automation
+# Reviewer-facing helpers: marks approved PRs reviewed, pings Slack when a PR is
+# ready for review, links Jira tickets, and posts a 30-min digest of open PRs.
+# ─────────────────────────────────────────────────────────────────────────────
+# REQUIRED LABELS  (run examples/workflow-ensure-labels.yaml once to create them)
+# - `00 - Ready for Review` — dev applies by hand; triggers the Slack ping + digest.
+# - `00 - Reviewed`         — applied on approval; excludes the PR from the digest.
+# Missing labels hard-fail the job (a red X = a real setup problem, not hidden).
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:

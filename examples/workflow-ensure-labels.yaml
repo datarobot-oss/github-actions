@@ -1,21 +1,16 @@
 name: Ensure PR-automation labels
 
-# Manual, run-once (or run-whenever) setup for the labels the PR-automation &
-# backport workflows depend on. Trigger it from the Actions tab after adding the
-# automation to a repo — it creates `00 - Ready for Review`, `00 - Reviewed` and
-# the fixed backport labels (`backport-failed`, `do not merge`) with consistent
-# colour/description so the helper jobs never fail on a missing label. Safe to
-# re-run: it's idempotent.
-#
-# Fill "Backport branches" to also create per-branch backport label pairs
-# (`backport <branch>` + `backported <branch>`) for your release lines, e.g.
-# "release/11.1, release/11.2".
-#
-# Tick "Delete confusable label variants" to also clean up wrong REVIEW labels
-# people applied by accident (e.g. `Ready for Review` without the `00 - ` prefix).
-# Open PRs carrying the wrong label are migrated to the canonical one before it's
-# deleted, so nothing drops out of the review funnel. Backport labels are never
-# touched by this.
+# ─────────────────────────────────────────────────────────────────────────────
+# Ensure PR-automation labels
+# One-shot, idempotent label setup for the PR-automation & backport workflows.
+# Run from Actions → Run workflow. Optionally pass release branches to also make
+# backport label pairs, or enable cleanup of confusable review-label variants.
+# ─────────────────────────────────────────────────────────────────────────────
+# REQUIRED LABELS
+# - None — this workflow CREATES the labels the others require:
+#   `00 - Ready for Review`, `00 - Reviewed`, `backport-failed`, `do not merge`
+#   (+ `backport <branch>` / `backported <branch>` for any branches you pass).
+# ─────────────────────────────────────────────────────────────────────────────
 
 on:
   workflow_dispatch:

@@ -1,34 +1,16 @@
 name: Backport
 
-# Drop-in backport automation. Copy to .github/workflows/ in your repo.
-#
-# TWO ways to trigger a backport of a MERGED PR — both open a cherry-pick PR
-# against the target branch:
-#
-#   1. Label (self-serve, no repo access needed): on a merged PR add a label
-#      `backport <branch>` e.g. `backport release/12.0`. Add several to fan out.
-#      Works whether the label is added before or after merge.
-#
-#   2. Manual run (Actions tab → "Backport" → "Run workflow"): enter a merged PR
-#      number and the target branch(es). No labels required — handy for one-off or
-#      less-common branches, or if you'd just rather watch the run.
-#
-# Bump @<version> to pick up new revisions of the reusable workflow.
-#
-# ─── REQUIRED LABELS (repo admin must create these in the repo) ───────────────
-#   `backport <branch>`   e.g. `backport release/12.0` — TRIGGER label a dev adds
-#                         by hand, so it MUST exist for them to pick it. Create one
-#                         per target branch you intend to support. (Not needed for
-#                         the manual run — that takes the branch as an input.)
-#   `backported <branch>` e.g. `backported release/12.0` — added on success.
-#                         Auto-created by the API if missing, but pre-create it so
-#                         it has a sensible colour/description.
-#   `backport-failed`     — added when a cherry-pick conflicts. Auto-created if
-#                         missing; pre-create for colour/description.
-#   `do not merge`        — added to the BACKPORT PR when no GitHub App token is
-#                         configured (CI did not auto-run). Auto-created; pre-make
-#                         it red and, ideally, wire branch protection so a PR with
-#                         this label can't be merged.
+# ─────────────────────────────────────────────────────────────────────────────
+# Backport
+# Cherry-picks a MERGED PR onto release branch(es), opening a PR per branch.
+# Trigger by adding a `backport <branch>` label, or via Actions → Run workflow
+# (enter a PR number + target branches). See BACKPORT.md for details & App setup.
+# ─────────────────────────────────────────────────────────────────────────────
+# REQUIRED LABELS  (run examples/workflow-ensure-labels.yaml once to create them)
+# - `backport <branch>`   — dev applies by hand to trigger; one per target branch.
+# - `backported <branch>` — added on success.
+# - `backport-failed`     — added when a cherry-pick conflicts.
+# - `do not merge`        — added to the backport PR when CI didn't auto-run.
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:
