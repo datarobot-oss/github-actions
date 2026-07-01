@@ -2,7 +2,9 @@ name: Backport
 
 # Trigger wrapper that dogfoods the reusable backport workflow in THIS repo.
 # Downstream repos should copy examples/workflow-backport.yaml instead (it pins
-# a released @version of the reusable workflow).
+# a released @version of the reusable workflow). Kept structurally identical to
+# that example so both trigger paths — labels and manual dispatch — are exercised
+# here before a release is cut.
 
 on:
   # pull_request_target runs in the base-branch context with write access and
@@ -10,6 +12,17 @@ on:
   # internal repos where PRs come from branches, not untrusted forks.
   pull_request_target:
     types: [closed, labeled]
+  # Manual backport of a merged PR onto arbitrary branch(es), no labels needed.
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'Merged PR number to backport (e.g. 1234)'
+        required: true
+        type: string
+      target_branches:
+        description: 'Target branch(es), space-separated (e.g. "release/12.0 release/11.0")'
+        required: true
+        type: string
 
 jobs:
   # Decide which backport labels this run should act on, then pass that as the
@@ -23,6 +36,7 @@ jobs:
     # whether the label was added before merge (fires on `closed`) or after
     # (fires on `labeled`).
     if: >-
+      github.event_name == 'pull_request_target' &&
       github.event.pull_request.merged == true &&
       (
         (github.event.action == 'labeled' && startsWith(github.event.label.name, 'backport ')) ||
@@ -58,6 +72,22 @@ jobs:
       label_pattern: ${{ needs.prepare.outputs.label_pattern }}
     secrets:
       # Optional — leave unset to fall back to GITHUB_TOKEN (no CI on backport PR).
+      APP_ID: ${{ secrets.BACKPORT_APP_ID }}
+      APP_PRIVATE_KEY: ${{ secrets.BACKPORT_APP_PRIVATE_KEY }}
+    permissions:
+      contents: write
+      pull-requests: write
+
+  # Manual dispatch: backport a merged PR by number onto the given branch(es).
+  # fromJSON() converts the string dispatch input to the number the reusable
+  # workflow expects.
+  backport-manual:
+    if: github.event_name == 'workflow_dispatch'
+    uses: ./.github/workflows/backport.yaml
+    with:
+      pr_number: ${{ fromJSON(inputs.pr_number) }}
+      target_branches: ${{ inputs.target_branches }}
+    secrets:
       APP_ID: ${{ secrets.BACKPORT_APP_ID }}
       APP_PRIVATE_KEY: ${{ secrets.BACKPORT_APP_PRIVATE_KEY }}
     permissions:

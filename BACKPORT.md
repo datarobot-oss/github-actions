@@ -1,9 +1,11 @@
 # Backport / Cherry-Pick Automation
 
-Label a merged PR and a cherry-pick PR is opened on the branch you name. Write
-once here, distribute to every repo by copying one example workflow.
+Point the automation at a merged PR and a cherry-pick PR is opened on the branch
+you name. Write once here, distribute to every repo by copying one example
+workflow. There are two ways to trigger it: **labels** (self-serve) and a
+**manual run** (Actions tab).
 
-## TL;DR usage
+## TL;DR usage — labels
 
 1. Merge your fix to `main` as normal.
 2. Add a label to the PR: **`backport <branch>`** — e.g. `backport release/12.0`.
@@ -13,6 +15,22 @@ once here, distribute to every repo by copying one example workflow.
    assigned to you, titled `[Backport release/12.0] <original title>`.
 4. The original PR gets a comment with the result and a **`backported <branch>`**
    label. The trigger label stays as the permanent record.
+
+## TL;DR usage — manual run (no labels)
+
+Prefer to just point at a PR and a branch — like the old Jenkins "cherry-pick
+this PR to this branch" job? Or backporting to a one-off branch nobody made a
+label for?
+
+1. Actions tab → **Backport** → **Run workflow**.
+2. Enter the **merged PR number** and the **target branch(es)** (space-separated
+   for several), then **Run workflow**.
+3. Same result as the label flow: a cherry-pick PR per branch, and the source PR
+   gets the result comment + `backported <branch>` label.
+
+No `backport <branch>` label needs to exist for this path — the branch is taken
+straight from the form. The PR must already be **merged** (the automation
+cherry-picks what landed; there's nothing to pick from an open PR).
 
 ### When the cherry-pick conflicts
 

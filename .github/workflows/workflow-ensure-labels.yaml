@@ -1,0 +1,23 @@
+name: Ensure PR-automation labels
+
+# Dogfoods the ensure-labels reusable workflow in THIS repo. Downstream repos
+# should copy examples/workflow-ensure-labels.yaml instead (it pins @version).
+# Manual only — run it from the Actions tab to create/repair the automation labels.
+
+on:
+  workflow_dispatch:
+    inputs:
+      delete_confusable:
+        description: 'Delete confusable label variants (migrates open PRs first)'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  ensure-labels:
+    uses: ./.github/workflows/ensure-labels.yaml
+    with:
+      delete_confusable: ${{ inputs.delete_confusable }}
+    permissions:
+      issues: write
+      pull-requests: write
