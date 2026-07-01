@@ -22,7 +22,7 @@ on:
 
 jobs:
   ensure-labels:
-    uses: datarobot-oss/github-actions/.github/workflows/ensure-labels.yaml@0.0.13  # bump to the release that includes ensure-labels.yaml
+    uses: datarobot-oss/github-actions/.github/workflows/ensure-labels.yaml@0.0.15  # bump to the release that includes ensure-labels.yaml
     with:
       delete_confusable: ${{ inputs.delete_confusable }}
     permissions:

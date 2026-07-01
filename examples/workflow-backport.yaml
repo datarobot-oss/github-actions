@@ -85,7 +85,7 @@ jobs:
 
   backport:
     needs: prepare
-    uses: datarobot-oss/github-actions/.github/workflows/backport.yaml@0.0.13  # bump to the release that includes backport.yaml
+    uses: datarobot-oss/github-actions/.github/workflows/backport.yaml@0.0.15  # bump to the release that includes backport.yaml
     with:
       pr_number: ${{ github.event.pull_request.number }}
       label_pattern: ${{ needs.prepare.outputs.label_pattern }}
@@ -106,7 +106,7 @@ jobs:
   # workflow expects. No labels involved.
   backport-manual:
     if: github.event_name == 'workflow_dispatch'
-    uses: datarobot-oss/github-actions/.github/workflows/backport.yaml@0.0.13  # bump to the release that includes backport.yaml
+    uses: datarobot-oss/github-actions/.github/workflows/backport.yaml@0.0.15  # bump to the release that includes backport.yaml
     with:
       pr_number: ${{ fromJSON(inputs.pr_number) }}
       target_branches: ${{ inputs.target_branches }}
