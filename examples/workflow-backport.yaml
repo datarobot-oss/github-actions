@@ -2,16 +2,24 @@ name: Backport
 
 # Drop-in backport automation. Copy to .github/workflows/ in your repo.
 #
-# Usage: on a MERGED PR, add a label `backport <branch>` (e.g. `backport release/12.0`).
-# A cherry-pick PR is opened against that branch. Add several labels to backport to
-# several branches at once. Works whether the label is added before or after merge.
+# TWO ways to trigger a backport of a MERGED PR — both open a cherry-pick PR
+# against the target branch:
+#
+#   1. Label (self-serve, no repo access needed): on a merged PR add a label
+#      `backport <branch>` e.g. `backport release/12.0`. Add several to fan out.
+#      Works whether the label is added before or after merge.
+#
+#   2. Manual run (Actions tab → "Backport" → "Run workflow"): enter a merged PR
+#      number and the target branch(es). No labels required — handy for one-off or
+#      less-common branches, or if you'd just rather watch the run.
 #
 # Bump @<version> to pick up new revisions of the reusable workflow.
 #
 # ─── REQUIRED LABELS (repo admin must create these in the repo) ───────────────
 #   `backport <branch>`   e.g. `backport release/12.0` — TRIGGER label a dev adds
 #                         by hand, so it MUST exist for them to pick it. Create one
-#                         per target branch you intend to support.
+#                         per target branch you intend to support. (Not needed for
+#                         the manual run — that takes the branch as an input.)
 #   `backported <branch>` e.g. `backported release/12.0` — added on success.
 #                         Auto-created by the API if missing, but pre-create it so
 #                         it has a sensible colour/description.
@@ -26,8 +34,19 @@ name: Backport
 on:
   pull_request_target:
     types: [closed, labeled]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'Merged PR number to backport (e.g. 1234)'
+        required: true
+        type: string
+      target_branches:
+        description: 'Target branch(es), space-separated (e.g. "release/12.0 release/11.0")'
+        required: true
+        type: string
 
 jobs:
+  # ── Flow 1: label-triggered ──────────────────────────────────────────────
   # Decide which backport labels this run should act on (see notes below), then
   # pass that to the reusable workflow as the korthout label_pattern. On merge
   # (`closed`) we process every `backport <branch>` label present. On a later
@@ -36,6 +55,7 @@ jobs:
   # re-attempting branches that were already backported (duplicate/failed reruns).
   prepare:
     if: >-
+      github.event_name == 'pull_request_target' &&
       github.event.pull_request.merged == true &&
       (
         (github.event.action == 'labeled' && startsWith(github.event.label.name, 'backport ')) ||
@@ -65,7 +85,7 @@ jobs:
 
   backport:
     needs: prepare
-    uses: datarobot-oss/github-actions/.github/workflows/backport.yaml@0.0.10  # bump to the release that includes backport.yaml
+    uses: datarobot-oss/github-actions/.github/workflows/backport.yaml@0.0.13  # bump to the release that includes backport.yaml
     with:
       pr_number: ${{ github.event.pull_request.number }}
       label_pattern: ${{ needs.prepare.outputs.label_pattern }}
@@ -74,6 +94,23 @@ jobs:
       # on it automatically. Omit both to fall back to the built-in GITHUB_TOKEN
       # (backport still works, but you'll need to push an empty commit / re-open the
       # PR to trigger its checks). See BACKPORT.md for the one-time App setup.
+      APP_ID: ${{ secrets.BACKPORT_APP_ID }}
+      APP_PRIVATE_KEY: ${{ secrets.BACKPORT_APP_PRIVATE_KEY }}
+    permissions:
+      contents: write
+      pull-requests: write
+
+  # ── Flow 2: manual (workflow_dispatch) ───────────────────────────────────
+  # Backport a specific merged PR onto branch(es) typed into the Run-workflow
+  # form. fromJSON() turns the string input into the number the reusable
+  # workflow expects. No labels involved.
+  backport-manual:
+    if: github.event_name == 'workflow_dispatch'
+    uses: datarobot-oss/github-actions/.github/workflows/backport.yaml@0.0.13  # bump to the release that includes backport.yaml
+    with:
+      pr_number: ${{ fromJSON(inputs.pr_number) }}
+      target_branches: ${{ inputs.target_branches }}
+    secrets:
       APP_ID: ${{ secrets.BACKPORT_APP_ID }}
       APP_PRIVATE_KEY: ${{ secrets.BACKPORT_APP_PRIVATE_KEY }}
     permissions:

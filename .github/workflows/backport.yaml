@@ -7,6 +7,14 @@ name: Backport merged PR
 # branches at once. The destination is encoded in the label, so there is nothing
 # else to configure per-PR.
 #
+# Two ways to choose the destination:
+#   * Labels — `label_pattern` extracts the branch from `backport <branch>` labels
+#     on the PR (the default, event-driven flow).
+#   * Direct — pass `target_branches` (space-delimited) to backport a merged PR by
+#     number onto specific branches with NO labels needed (the manual /
+#     workflow_dispatch flow). The two can be combined; korthout backports to the
+#     union of both.
+#
 # Token / CI behaviour:
 #   * If the optional APP_ID + APP_PRIVATE_KEY secrets are provided, the backport
 #     PR is opened by a GitHub App and CI runs on it automatically.
@@ -28,6 +36,11 @@ on:
         required: false
         type: string
         default: '^backport ([^ ]+)$'
+      target_branches:
+        description: "Space-delimited branch(es) to backport onto directly, without labels — for the manual/dispatch flow (e.g. 'release/12.0 release/11.0'). Empty in the label-driven flow."
+        required: false
+        type: string
+        default: ''
     secrets:
       APP_ID:
         description: "GitHub App ID (optional; enables CI on the backport PR)."
@@ -68,6 +81,13 @@ jobs:
         with:
           github_token: ${{ steps.app-token.outputs.token || github.token }}
           label_pattern: ${{ inputs.label_pattern }}
+          # Direct target(s) for the manual flow; empty ('') in the label flow,
+          # where korthout derives the branch from the PR's labels instead.
+          target_branches: ${{ inputs.target_branches }}
+          # Explicit source PR — required when no pull_request event is in context
+          # (workflow_dispatch). Equals the event PR number in the label flow, so
+          # this is a no-op there.
+          source_pr_number: ${{ inputs.pr_number }}
           pull_title: "[Backport ${target_branch}] ${pull_title}"
           pull_description: |
             Automated backport of #${pull_number} to `${target_branch}`.
