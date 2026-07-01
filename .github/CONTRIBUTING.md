@@ -4,6 +4,7 @@ Guidelines for developing and contributing to this project.
 
 ## List of project maintainers
 
+- [DataRobot](https://www.datarobot.com)
 - [Matt Nitzken](https://github.com/mjnitz02)
 
 
