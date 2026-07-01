@@ -63,3 +63,5 @@ jobs:
       # write so the digest can reconcile a missing "00 - Reviewed" label when
       # the event-driven mark-reviewed run was never dispatched.
       pull-requests: write
+      # read so the digest can report real CI status via the combined-status API.
+      statuses: read

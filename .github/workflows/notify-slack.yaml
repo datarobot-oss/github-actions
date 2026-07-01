@@ -20,7 +20,9 @@ jobs:
       # write (not read) so the digest can reconcile a missing "00 - Reviewed"
       # label when the event-driven mark-reviewed run was never dispatched.
       pull-requests: write
-      checks: read
+      # read so the combined-status API call (/commits/{sha}/status) can
+      # report real CI state instead of silently defaulting to "pending".
+      statuses: read
 
     steps:
       - name: Fetch open PRs with ready for review labels
