@@ -56,11 +56,13 @@ git cherry-pick <merge_sha>     # -m 1 for a merge commit
 To onboard a repo:
 
 1. Copy `examples/workflow-backport.yaml` into its `.github/workflows/`.
-2. **Create the trigger labels** the repo will use — one `backport <branch>` per
-   target branch (e.g. `backport release/12.0`). A dev applies these by hand, so
-   they must exist first. The result labels (`backported <branch>`,
-   `backport-failed`) are auto-created on first use but are worth pre-making for a
-   sensible colour/description.
+2. **Create the labels.** Copy `examples/workflow-ensure-labels.yaml` too and run
+   it once from the Actions tab, filling **Backport branches** with your release
+   lines (e.g. `release/12.0, release/11.1`). That creates each `backport <branch>`
+   trigger label a dev applies by hand, its matching `backported <branch>`, and
+   the fixed `backport-failed` / `do not merge` labels — all with sensible
+   colours. (You can still create them by hand instead; the label-driven flow just
+   needs the `backport <branch>` trigger labels to exist.)
 3. Commit. Bump the `@version` to upgrade later — no other change needed.
 
 > The required-labels list is also repeated as a comment block at the top of the
