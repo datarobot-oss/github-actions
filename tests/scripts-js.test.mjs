@@ -109,34 +109,86 @@ const REVIEWED = {
   color: '5319e7',
   description: 'PR has been approved — excludes it from the ready-for-review digest.',
 };
+// The two fixed backport labels, always ensured alongside the review labels.
+const FAILED = {
+  name: 'backport-failed',
+  color: 'd93f0b',
+  description: 'A backport cherry-pick hit a conflict and needs manual resolution.',
+};
+const DO_NOT_MERGE = {
+  name: 'do not merge',
+  color: 'b60205',
+  description: 'Do not merge yet (e.g. CI has not run on a backport PR).',
+};
 
-test('ensure-labels: creates both canonical labels when none exist', async () => {
+test('ensure-labels: creates all four fixed canonical labels when none exist', async () => {
   const github = makeGithub({ 'rest.issues.listLabelsForRepo': { data: [] } });
   await runGithubScript(ensureLabelsScript(), {
     github, context: ctx, templateVars: { 'inputs.delete_confusable': false },
   });
 
   const created = github.callsTo('rest.issues.createLabel').map((c) => c.params.name).sort();
-  assert.deepEqual(created, ['00 - Ready for Review', '00 - Reviewed']);
+  assert.deepEqual(created, ['00 - Ready for Review', '00 - Reviewed', 'backport-failed', 'do not merge']);
   assert.equal(github.callsTo('rest.issues.updateLabel').length, 0);
   assert.equal(github.callsTo('rest.issues.deleteLabel').length, 0);
 });
 
-test('ensure-labels: updates a drifted label and leaves an up-to-date one alone', async () => {
+test('ensure-labels: updates a drifted label and leaves up-to-date ones alone', async () => {
   const github = makeGithub({
     'rest.issues.listLabelsForRepo': {
-      data: [REVIEWED, { ...READY, color: 'ffffff', description: 'stale' }],
+      data: [REVIEWED, FAILED, DO_NOT_MERGE, { ...READY, color: 'ffffff', description: 'stale' }],
     },
   });
   await runGithubScript(ensureLabelsScript(), {
     github, context: ctx, templateVars: { 'inputs.delete_confusable': false },
   });
 
-  assert.equal(github.callsTo('rest.issues.createLabel').length, 0, 'both already exist');
+  assert.equal(github.callsTo('rest.issues.createLabel').length, 0, 'all already exist');
   const updated = github.callsTo('rest.issues.updateLabel');
   assert.equal(updated.length, 1, 'only the drifted label is updated');
   assert.equal(updated[0].params.name, '00 - Ready for Review');
   assert.equal(updated[0].params.color, '0e8a16');
+});
+
+test('ensure-labels: backport_branches creates backport + backported label pairs', async () => {
+  const github = makeGithub({
+    'rest.issues.listLabelsForRepo': { data: [READY, REVIEWED, FAILED, DO_NOT_MERGE] },
+  });
+  await runGithubScript(ensureLabelsScript(), {
+    github,
+    context: ctx,
+    env: { BACKPORT_BRANCHES: 'release/11.1, release/11.2' },
+    templateVars: { 'inputs.delete_confusable': false },
+  });
+
+  // Fixed labels already exist -> only the four per-branch labels are created.
+  const created = github.callsTo('rest.issues.createLabel').map((c) => c.params.name).sort();
+  assert.deepEqual(created, [
+    'backport release/11.1',
+    'backport release/11.2',
+    'backported release/11.1',
+    'backported release/11.2',
+  ]);
+});
+
+test('ensure-labels: delete_confusable never deletes managed backport labels', async () => {
+  const github = makeGithub({
+    'rest.issues.listLabelsForRepo': {
+      data: [
+        READY, REVIEWED, FAILED, DO_NOT_MERGE,
+        { name: 'backport release/11.1', color: '1d76db', description: 'Backport this PR to release/11.1.' },
+      ],
+    },
+    'rest.issues.listForRepo': { data: [] },
+  });
+  await runGithubScript(ensureLabelsScript(), {
+    github,
+    context: ctx,
+    env: { BACKPORT_BRANCHES: 'release/11.1' },
+    templateVars: { 'inputs.delete_confusable': true },
+  });
+
+  assert.equal(github.callsTo('rest.issues.deleteLabel').length, 0, 'backport labels survive cleanup');
 });
 
 test('ensure-labels: with delete_confusable=false, confusable variants are left untouched', async () => {

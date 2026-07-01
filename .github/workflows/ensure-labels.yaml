@@ -1,13 +1,16 @@
 name: Ensure PR-automation labels
 
-# Idempotent setup for the labels this repo's PR-automation workflows depend on.
-# Run it once (manually) after wiring up the automation and the repo is good to
-# go — the labels exist with consistent colour/description, so the helper jobs
-# never fail on a missing label.
+# Idempotent setup for the labels this repo's PR-automation & backport workflows
+# depend on. Run it once (manually) after wiring up the automation and the repo
+# is good to go — the labels exist with consistent colour/description, so the
+# helper jobs never fail on a missing label.
 #
-# Backport/release labels (`backport …`, `backported …`, `backport-failed`,
-# `do not merge`, `release/*`) are intentionally NOT managed here: the backport
-# flow creates those on demand and they vary per release branch.
+# Always ensured: the review labels `00 - Ready for Review` / `00 - Reviewed`
+# and the two fixed backport labels `backport-failed` / `do not merge`.
+#
+# Pass `backport_branches` to ALSO create the per-branch backport label pairs
+# (`backport <branch>` + `backported <branch>`) for your release lines — these
+# vary per repo, so they're opt-in rather than hardcoded.
 
 on:
   workflow_call:
@@ -15,12 +18,22 @@ on:
       delete_confusable:
         description: >-
           Destructive cleanup. When true, any label that is a "confusable"
-          variant of a canonical label (e.g. `Ready for Review` vs the canonical
-          `00 - Ready for Review`) is removed. Open PRs carrying the wrong label
-          are first migrated to the canonical one so they stay in the funnel.
+          variant of a canonical review label (e.g. `Ready for Review` vs the
+          canonical `00 - Ready for Review`) is removed. Open PRs carrying the
+          wrong label are first migrated to the canonical one so they stay in the
+          funnel. Backport labels are never touched by this.
         required: false
         default: false
         type: boolean
+      backport_branches:
+        description: >-
+          Optional comma/space-separated release branches to create backport
+          labels for (e.g. "release/11.1, release/11.2"). For each, both
+          `backport <branch>` (trigger) and `backported <branch>` (applied on
+          success) are created.
+        required: false
+        default: ''
+        type: string
 
 jobs:
   ensure-labels:
@@ -34,14 +47,18 @@ jobs:
     steps:
       - name: Ensure labels exist (and optionally clean up confusable variants)
         uses: actions/github-script@v7
+        env:
+          # Passed via env (not `${{ }}` string-interpolation into the script)
+          # so branch names can never break out of the JS source.
+          BACKPORT_BRANCHES: ${{ inputs.backport_branches }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            // Canonical PR-automation labels this repo's reusable workflows rely
-            // on. The "00 - " prefix sorts them to the top of the label picker so
-            // devs grab the right one. Each carries a `confusable` regex matching
-            // the accidental variants people apply instead — anchored so the two
-            // canonical labels can never match each other's pattern.
+            // Canonical labels the workflows rely on. The review labels carry a
+            // `confusable` regex matching the accidental variants people apply
+            // instead (anchored so the two can never match each other). The fixed
+            // backport labels have no `confusable` — we ensure they exist but
+            // never auto-delete look-alikes for them.
             const CANONICAL = [
               {
                 name: '00 - Ready for Review',
@@ -55,10 +72,31 @@ jobs:
                 description: 'PR has been approved — excludes it from the ready-for-review digest.',
                 confusable: /^(\d+\s*-\s*)?reviewed$/i,
               },
+              {
+                name: 'backport-failed',
+                color: 'd93f0b',
+                description: 'A backport cherry-pick hit a conflict and needs manual resolution.',
+              },
+              {
+                name: 'do not merge',
+                color: 'b60205',
+                description: 'Do not merge yet (e.g. CI has not run on a backport PR).',
+              },
             ];
 
-            // Never delete these even if a confusable pattern somehow matched —
-            // the backport/release flow owns them.
+            // Optional per-branch backport labels, generated from the input list.
+            const backportBranches = (process.env.BACKPORT_BRANCHES || '')
+              .split(/[\s,]+/).map(s => s.trim()).filter(Boolean);
+            const backportLabels = backportBranches.flatMap(branch => ([
+              { name: `backport ${branch}`,   color: '1d76db', description: `Backport this PR to ${branch}.` },
+              { name: `backported ${branch}`, color: '0e8a16', description: `Backported to ${branch}.` },
+            ]));
+
+            // Everything we intend to create/keep up to date.
+            const desired = [...CANONICAL, ...backportLabels];
+
+            // Never delete these during cleanup even if a confusable pattern
+            // somehow matched — the backport/release flow owns them.
             const PROTECTED = /^(backport\b|backported\b|backport-failed$|do not merge$|release\/)/i;
 
             const deleteConfusable = ${{ inputs.delete_confusable }};
@@ -70,8 +108,8 @@ jobs:
             });
             const byName = new Map(existing.map(l => [l.name, l]));
 
-            // 2. Create each canonical label, or align its colour/description.
-            for (const label of CANONICAL) {
+            // 2. Create each desired label, or align its colour/description.
+            for (const label of desired) {
               const current = byName.get(label.name);
               if (!current) {
                 await github.rest.issues.createLabel({
@@ -88,16 +126,16 @@ jobs:
               }
             }
 
-            // 3. Optional destructive cleanup of confusable variants.
+            // 3. Optional destructive cleanup of confusable review-label variants.
             if (!deleteConfusable) {
               core.info('delete_confusable=false — skipping cleanup of confusable labels.');
               return;
             }
 
             for (const { name } of existing) {
-              if (CANONICAL.some(c => c.name === name)) continue; // keep the canonical labels
-              if (PROTECTED.test(name)) continue;                 // never touch backport/release labels
-              const canonical = CANONICAL.find(c => c.confusable.test(name));
+              if (desired.some(d => d.name === name)) continue;    // keep anything we manage
+              if (PROTECTED.test(name)) continue;                  // never touch backport/release labels
+              const canonical = CANONICAL.find(c => c.confusable && c.confusable.test(name));
               if (!canonical) continue;
 
               core.warning(`Confusable label "${name}" → migrating open PRs to "${canonical.name}", then deleting it.`);

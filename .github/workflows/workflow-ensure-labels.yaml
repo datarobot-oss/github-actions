@@ -7,8 +7,13 @@ name: Ensure PR-automation labels
 on:
   workflow_dispatch:
     inputs:
+      backport_branches:
+        description: 'Backport branches, comma/space-separated (e.g. "release/11.1, release/11.2"). Leave blank to skip.'
+        required: false
+        default: ''
+        type: string
       delete_confusable:
-        description: 'Delete confusable label variants (migrates open PRs first)'
+        description: 'Delete confusable review-label variants (migrates open PRs first)'
         required: false
         default: false
         type: boolean
@@ -17,6 +22,7 @@ jobs:
   ensure-labels:
     uses: ./.github/workflows/ensure-labels.yaml
     with:
+      backport_branches: ${{ inputs.backport_branches }}
       delete_confusable: ${{ inputs.delete_confusable }}
     permissions:
       issues: write
