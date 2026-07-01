@@ -20,7 +20,7 @@ concurrency:
 jobs:
   # Tag the next patch version and cut a GitHub release.
   release:
-    uses: datarobot-oss/github-actions/.github/workflows/create-release-on-merge.yaml@0.0.15
+    uses: datarobot-oss/github-actions/.github/workflows/create-release-on-merge.yaml@0.0.16
     permissions:
       contents: write
       pull-requests: read
