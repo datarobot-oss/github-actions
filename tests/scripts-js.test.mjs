@@ -209,23 +209,23 @@ function ensureLabelsScript() {
 // "already up to date" fixtures so create/update calls stay quiet).
 const READY = {
   name: '00 - Ready for Review',
-  color: '0e8a16',
+  color: '1ac387',
   description: 'PR is ready for team review — triggers the Slack notification & digest.',
 };
 const REVIEWED = {
   name: '00 - Reviewed',
-  color: '5319e7',
+  color: 'd07dd3',
   description: 'PR has been approved — excludes it from the ready-for-review digest.',
 };
 // The two fixed backport labels, always ensured alongside the review labels.
 const FAILED = {
   name: 'backport-failed',
-  color: 'd93f0b',
+  color: 'f4931d',
   description: 'A backport cherry-pick hit a conflict and needs manual resolution.',
 };
 const DO_NOT_MERGE = {
   name: 'do not merge',
-  color: 'b60205',
+  color: 'ff0000',
   description: 'Do not merge yet (e.g. CI has not run on a backport PR).',
 };
 
@@ -255,7 +255,7 @@ test('ensure-labels: updates a drifted label and leaves up-to-date ones alone', 
   const updated = github.callsTo('rest.issues.updateLabel');
   assert.equal(updated.length, 1, 'only the drifted label is updated');
   assert.equal(updated[0].params.name, '00 - Ready for Review');
-  assert.equal(updated[0].params.color, '0e8a16');
+  assert.equal(updated[0].params.color, '1ac387');
 });
 
 test('ensure-labels: a differently-cased existing label is renamed, not re-created', async () => {
@@ -304,7 +304,7 @@ test('ensure-labels: delete_confusable never deletes managed backport labels', a
     'rest.issues.listLabelsForRepo': {
       data: [
         READY, REVIEWED, FAILED, DO_NOT_MERGE,
-        { name: 'backport release/11.1', color: '1d76db', description: 'Backport this PR to release/11.1.' },
+        { name: 'backport release/11.1', color: '301b8e', description: 'Backport this PR to release/11.1.' },
       ],
     },
     'rest.issues.listForRepo': { data: [] },
