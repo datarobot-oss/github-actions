@@ -5,6 +5,9 @@
 //             print "{}" so jq still has valid JSON to chew on.
 //   * POST / --data -> captures {url, data} as a JSON line in __CURL_CAPTURE so a
 //             test can assert exactly what would have been sent (e.g. to Slack).
+//   * __CURL_FAIL -> if set, POSTs are still captured but exit non-zero (as
+//             `curl -f` does on an HTTP >= 400), so tests can simulate a Slack
+//             outage / rate limit and prove the caller doesn't fail the job.
 import { appendFileSync } from 'node:fs';
 const args = process.argv.slice(2);
 
@@ -21,8 +24,12 @@ for (let i = 0; i < args.length; i++) {
 }
 
 const captureFile = process.env.__CURL_CAPTURE;
-if ((method === 'POST' || data !== null) && captureFile) {
-  appendFileSync(captureFile, JSON.stringify({ url, data }) + '\n');
+if (method === 'POST' || data !== null) {
+  if (captureFile) appendFileSync(captureFile, JSON.stringify({ url, data }) + '\n');
+  if (process.env.__CURL_FAIL) {
+    process.stderr.write('curl: (22) The requested URL returned error: 500\n');
+    process.exit(22);
+  }
   process.stdout.write('{"ok":true}\n');
   process.exit(0);
 }

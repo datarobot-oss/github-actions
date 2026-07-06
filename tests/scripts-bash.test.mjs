@@ -118,6 +118,45 @@ test('mark-pr-to-review: builds valid Slack JSON and is injection-safe', () => {
   assert.ok(text.includes('by alice'));
 });
 
+test('mark-pr-to-review: a failing Slack POST does not red-X the job', () => {
+  const script = runScript(loadWorkflow('mark-pr-to-review'), { name: 'Send notification to Slack' });
+  const r = runBash(script, {
+    env: {
+      __CURL_FAIL: '1', // simulate Slack 5xx / rate limit
+      SLACK_WEBHOOK_URL: 'https://hooks.slack.test/abc',
+      PR_NR: '123',
+      PR_URL: 'https://github.com/org/repo/pull/123',
+      PR_TITLE: 'A normal title',
+      PR_AUTHOR: 'alice',
+      PR_ADDITIONS: '10',
+      PR_DELETIONS: '3',
+      REPO_NAME: 'org/repo',
+    },
+  });
+  assert.equal(r.code, 0, 'a Slack outage must not fail the caller check');
+  assert.equal(r.posts.length, 1, 'the POST was still attempted');
+  assert.match(r.stderr, /continuing without failing the job/);
+});
+
+test('mark-pr-to-review: an empty webhook URL is skipped, not crashed on', () => {
+  const script = runScript(loadWorkflow('mark-pr-to-review'), { name: 'Send notification to Slack' });
+  const r = runBash(script, {
+    env: {
+      SLACK_WEBHOOK_URL: '',
+      PR_NR: '123',
+      PR_URL: 'https://github.com/org/repo/pull/123',
+      PR_TITLE: 'A normal title',
+      PR_AUTHOR: 'alice',
+      PR_ADDITIONS: '10',
+      PR_DELETIONS: '3',
+      REPO_NAME: 'org/repo',
+    },
+  });
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(r.posts.length, 0, 'no POST attempted without a webhook URL');
+  assert.match(r.stderr, /empty; skipping/);
+});
+
 // --------------------------------------------------------------------------
 // notify-slack.yaml — scheduled digest of open "ready for review" PRs
 // --------------------------------------------------------------------------
