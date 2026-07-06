@@ -150,6 +150,26 @@ test('ensure-labels: updates a drifted label and leaves up-to-date ones alone', 
   assert.equal(updated[0].params.color, '0e8a16');
 });
 
+test('ensure-labels: a differently-cased existing label is renamed, not re-created', async () => {
+  // GitHub label uniqueness is case-insensitive. A pre-existing "Do not merge"
+  // must be matched (and renamed to canonical case) rather than re-created —
+  // otherwise createLabel hits a 422 already_exists collision.
+  const github = makeGithub({
+    'rest.issues.listLabelsForRepo': {
+      data: [READY, REVIEWED, FAILED, { ...DO_NOT_MERGE, name: 'Do not merge' }],
+    },
+  });
+  await runGithubScript(ensureLabelsScript(), {
+    github, context: ctx, templateVars: { 'inputs.delete_confusable': false },
+  });
+
+  assert.equal(github.callsTo('rest.issues.createLabel').length, 0, 'no collision-inducing create');
+  const updated = github.callsTo('rest.issues.updateLabel');
+  assert.equal(updated.length, 1, 'only the mis-cased label is touched');
+  assert.equal(updated[0].params.name, 'Do not merge', 'targets the existing casing');
+  assert.equal(updated[0].params.new_name, 'do not merge', 'renamed to canonical casing');
+});
+
 test('ensure-labels: backport_branches creates backport + backported label pairs', async () => {
   const github = makeGithub({
     'rest.issues.listLabelsForRepo': { data: [READY, REVIEWED, FAILED, DO_NOT_MERGE] },
