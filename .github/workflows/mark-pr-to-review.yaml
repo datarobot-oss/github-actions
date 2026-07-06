@@ -91,6 +91,17 @@ jobs:
               }]
             }')
 
-          curl -fsS -X POST -H 'Content-type: application/json' \
+          if [ -z "$SLACK_WEBHOOK_URL" ]; then
+            echo "SLACK_WEBHOOK_URL is empty; skipping Slack notification" >&2
+            exit 0
+          fi
+
+          # A Slack hiccup (rate limit, outage, rotated webhook) must not fail
+          # the caller's PR check. Retry transient errors, then swallow a final
+          # failure with a log line instead of letting -f red-X the job.
+          if ! curl -fsS --retry 3 --retry-connrefused \
+            -X POST -H 'Content-type: application/json' \
             --data "$PAYLOAD" \
-            "$SLACK_WEBHOOK_URL" >/dev/null
+            "$SLACK_WEBHOOK_URL" >/dev/null; then
+            echo "Slack notification failed to send; continuing without failing the job" >&2
+          fi

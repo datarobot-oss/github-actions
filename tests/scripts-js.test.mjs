@@ -71,6 +71,73 @@ test('add-jira-link: updates the existing bot comment instead of duplicating', a
   assert.equal(updated[0].params.comment_id, 99, 'updates the existing bot comment');
 });
 
+test('add-jira-link: tolerates a ghost-author comment (user: null)', async () => {
+  const script = githubScript(loadWorkflow('add-jira-link'), { name: 'Comment with Jira link' });
+  const github = makeGithub({
+    'rest.issues.listComments': {
+      data: [
+        { id: 1, user: null, body: 'comment from a deleted account' },
+        { id: 99, user: { type: 'Bot' }, body: '### 🎫 Jira Ticket\n\nold' },
+      ],
+    },
+  });
+
+  await runGithubScript(script, {
+    github,
+    context: ctx,
+    env: { TICKET_IDS: 'BUZZOK-9', PR_NUMBER: '7' },
+  });
+
+  // Must not crash on the null author, and still find/update the bot comment.
+  const updated = github.callsTo('rest.issues.updateComment');
+  assert.equal(updated.length, 1, 'still updates the existing bot comment');
+  assert.equal(updated[0].params.comment_id, 99);
+  assert.equal(github.callsTo('rest.issues.createComment').length, 0);
+});
+
+test('add-jira-link: tolerates a comment with a null body', async () => {
+  const script = githubScript(loadWorkflow('add-jira-link'), { name: 'Comment with Jira link' });
+  const github = makeGithub({
+    'rest.issues.listComments': {
+      data: [{ id: 1, user: { type: 'Bot' }, body: null }],
+    },
+  });
+
+  await runGithubScript(script, {
+    github,
+    context: ctx,
+    env: { TICKET_IDS: 'BUZZOK-9', PR_NUMBER: '7' },
+  });
+
+  // No existing Jira comment matched -> creates one, without crashing.
+  assert.equal(github.callsTo('rest.issues.createComment').length, 1);
+  assert.equal(github.callsTo('rest.issues.updateComment').length, 0);
+});
+
+test('add-jira-link: paginates so a comment on a later page is still found', async () => {
+  const script = githubScript(loadWorkflow('add-jira-link'), { name: 'Comment with Jira link' });
+  // paginate() in the fake unwraps `.data`; return a long list whose bot
+  // comment would sit past the first API page in production.
+  const many = Array.from({ length: 40 }, (_, i) => ({
+    id: i + 1,
+    user: { type: 'User' },
+    body: `chatter ${i}`,
+  }));
+  many.push({ id: 999, user: { type: 'Bot' }, body: '### 🎫 Jira Ticket\n\nold' });
+  const github = makeGithub({ 'rest.issues.listComments': { data: many } });
+
+  await runGithubScript(script, {
+    github,
+    context: ctx,
+    env: { TICKET_IDS: 'BUZZOK-9', PR_NUMBER: '7' },
+  });
+
+  const updated = github.callsTo('rest.issues.updateComment');
+  assert.equal(updated.length, 1, 'finds the bot comment across pages and updates it');
+  assert.equal(updated[0].params.comment_id, 999);
+  assert.equal(github.callsTo('rest.issues.createComment').length, 0);
+});
+
 // --------------------------------------------------------------------------
 // mark-pr-reviewed.yaml — "Add 00 - Reviewed label"
 // --------------------------------------------------------------------------
@@ -81,13 +148,54 @@ test('mark-pr-reviewed: adds the "00 - Reviewed" label to the PR', async () => {
   await runGithubScript(script, {
     github,
     context: ctx,
-    templateVars: { 'inputs.pr_number': 314 },
+    env: { PR_NUMBER: '314' },
   });
 
   const labels = github.callsTo('rest.issues.addLabels');
   assert.equal(labels.length, 1);
   assert.equal(labels[0].params.issue_number, 314);
   assert.deepEqual(labels[0].params.labels, ['00 - Reviewed']);
+});
+
+test('mark-pr-reviewed: fails cleanly on an empty pr_number instead of a syntax error', async () => {
+  const script = githubScript(loadWorkflow('mark-pr-reviewed'), { name: 'Reviewed' });
+  const github = makeGithub();
+
+  // An empty value (e.g. a caller expression that resolved to nothing) must
+  // produce a clear core.setFailed, not crash the script body.
+  await assert.rejects(
+    runGithubScript(script, { github, context: ctx, env: { PR_NUMBER: '' } }),
+    /core\.setFailed: Invalid pr_number/,
+  );
+  assert.equal(github.callsTo('rest.issues.addLabels').length, 0, 'must not attempt to label');
+});
+
+test('mark-pr-reviewed: does not inline caller input into the script body (no injection)', async () => {
+  const script = githubScript(loadWorkflow('mark-pr-reviewed'), { name: 'Reviewed' });
+  const github = makeGithub();
+
+  // Were pr_number inlined into the source, this would break out and run
+  // arbitrary API calls. Read via process.env, it is inert data -> setFailed.
+  const evil = "1 }); await github.rest.issues.deleteLabel({ owner: 'x', repo: 'y', name: 'pwned' }); ({ issue_number: 1";
+  await assert.rejects(
+    runGithubScript(script, { github, context: ctx, env: { PR_NUMBER: evil } }),
+    /core\.setFailed: Invalid pr_number/,
+  );
+  assert.equal(github.callsTo('rest.issues.deleteLabel').length, 0, 'no injected call ran');
+  assert.equal(github.callsTo('rest.issues.addLabels').length, 0);
+});
+
+test('mark-pr-reviewed: a 404 from addLabels surfaces as a red check', async () => {
+  const script = githubScript(loadWorkflow('mark-pr-reviewed'), { name: 'Reviewed' });
+  const notFound = Object.assign(new Error('Not Found'), { status: 404 });
+  const github = makeGithub({ 'rest.issues.addLabels': notFound });
+
+  // By design the label is guaranteed to exist; a real failure (bad PR number,
+  // perms) should throw and fail the job rather than be swallowed.
+  await assert.rejects(
+    runGithubScript(script, { github, context: ctx, env: { PR_NUMBER: '314' } }),
+    /Not Found/,
+  );
 });
 
 // --------------------------------------------------------------------------
@@ -148,6 +256,26 @@ test('ensure-labels: updates a drifted label and leaves up-to-date ones alone', 
   assert.equal(updated.length, 1, 'only the drifted label is updated');
   assert.equal(updated[0].params.name, '00 - Ready for Review');
   assert.equal(updated[0].params.color, '0e8a16');
+});
+
+test('ensure-labels: a differently-cased existing label is renamed, not re-created', async () => {
+  // GitHub label uniqueness is case-insensitive. A pre-existing "Do not merge"
+  // must be matched (and renamed to canonical case) rather than re-created —
+  // otherwise createLabel hits a 422 already_exists collision.
+  const github = makeGithub({
+    'rest.issues.listLabelsForRepo': {
+      data: [READY, REVIEWED, FAILED, { ...DO_NOT_MERGE, name: 'Do not merge' }],
+    },
+  });
+  await runGithubScript(ensureLabelsScript(), {
+    github, context: ctx, templateVars: { 'inputs.delete_confusable': false },
+  });
+
+  assert.equal(github.callsTo('rest.issues.createLabel').length, 0, 'no collision-inducing create');
+  const updated = github.callsTo('rest.issues.updateLabel');
+  assert.equal(updated.length, 1, 'only the mis-cased label is touched');
+  assert.equal(updated[0].params.name, 'Do not merge', 'targets the existing casing');
+  assert.equal(updated[0].params.new_name, 'do not merge', 'renamed to canonical casing');
 });
 
 test('ensure-labels: backport_branches creates backport + backported label pairs', async () => {
@@ -233,6 +361,131 @@ test('ensure-labels: delete_confusable migrates open PRs then deletes the wrong 
   const reviewedMigrations = added.filter((c) => c.params.labels.includes('00 - Reviewed'));
   assert.deepEqual(readyMigrations.map((c) => c.params.issue_number).sort(), [12, 34]);
   assert.deepEqual(reviewedMigrations.map((c) => c.params.issue_number).sort(), [12, 34]);
+});
+
+test('ensure-labels: a mis-cased canonical review label is renamed but never deleted during cleanup', async () => {
+  // Regression: "00 - REVIEWED" is the SAME label as canonical "00 - Reviewed"
+  // (GitHub label uniqueness is case-insensitive). Step 2 renames it to
+  // canonical case; step 3 must not then treat the stale snapshot entry as a
+  // deletable confusable — doing so wipes the label it just repaired.
+  const github = makeGithub({
+    'rest.issues.listLabelsForRepo': {
+      data: [READY, { ...REVIEWED, name: '00 - REVIEWED' }, FAILED, DO_NOT_MERGE],
+    },
+    'rest.issues.listForRepo': { data: [] },
+  });
+  await runGithubScript(ensureLabelsScript(), {
+    github, context: ctx, templateVars: { 'inputs.delete_confusable': true },
+  });
+
+  const renamed = github.callsTo('rest.issues.updateLabel');
+  assert.equal(renamed.length, 1, 'only the mis-cased canonical is renamed');
+  assert.equal(renamed[0].params.name, '00 - REVIEWED');
+  assert.equal(renamed[0].params.new_name, '00 - Reviewed');
+
+  assert.equal(github.callsTo('rest.issues.deleteLabel').length, 0, 'the repaired canonical is never deleted');
+  assert.equal(github.callsTo('rest.issues.addLabels').length, 0, 'no bogus PR migration for a canonical label');
+});
+
+test('ensure-labels: mis-cased canonical + case-sensitive delete API does not crash the Action', async () => {
+  // GitHub's DELETE-label endpoint can be case-sensitive on lookup, so deleting
+  // the stale "00 - REVIEWED" name (already renamed to "00 - Reviewed") would
+  // 404 and reject — crashing the step. The cleanup must never issue that call.
+  const github = makeGithub({
+    'rest.issues.listLabelsForRepo': {
+      data: [READY, { ...REVIEWED, name: '00 - REVIEWED' }, FAILED, DO_NOT_MERGE],
+    },
+    'rest.issues.listForRepo': { data: [] },
+    'rest.issues.deleteLabel': ({ name }) =>
+      new Error(`404 Not Found: no label named "${name}"`),
+  });
+
+  await assert.doesNotReject(
+    runGithubScript(ensureLabelsScript(), {
+      github, context: ctx, templateVars: { 'inputs.delete_confusable': true },
+    }),
+    'the Action must not crash on a case-sensitive delete',
+  );
+});
+
+test('ensure-labels: duplicate backport branches create each label once (no 422 double-create)', async () => {
+  // Regression: the same branch listed twice must not queue the same label
+  // twice — the second createLabel would 422 "already_exists" and crash.
+  const github = makeGithub({
+    'rest.issues.listLabelsForRepo': { data: [READY, REVIEWED, FAILED, DO_NOT_MERGE] },
+    // Model the real API: a duplicate create for an existing name rejects.
+    'rest.issues.createLabel': (() => {
+      const seen = new Set();
+      return ({ name }) => {
+        const key = name.toLowerCase();
+        if (seen.has(key)) return new Error(`422 already_exists: "${name}"`);
+        seen.add(key);
+        return { data: {} };
+      };
+    })(),
+  });
+
+  await assert.doesNotReject(
+    runGithubScript(ensureLabelsScript(), {
+      github,
+      context: ctx,
+      env: { BACKPORT_BRANCHES: 'release/11.1, release/11.1' },
+      templateVars: { 'inputs.delete_confusable': false },
+    }),
+    'duplicate input must not cause a double-create',
+  );
+
+  const created = github.callsTo('rest.issues.createLabel').map((c) => c.params.name).sort();
+  assert.deepEqual(created, ['backport release/11.1', 'backported release/11.1']);
+});
+
+test('ensure-labels: branches whose labels collide case-insensitively create each label once', async () => {
+  // Two distinct git branches ("release/11.1" vs "Release/11.1") produce labels
+  // that GitHub treats as the same (case-insensitive) — must still create once.
+  const github = makeGithub({
+    'rest.issues.listLabelsForRepo': { data: [READY, REVIEWED, FAILED, DO_NOT_MERGE] },
+    'rest.issues.createLabel': (() => {
+      const seen = new Set();
+      return ({ name }) => {
+        const key = name.toLowerCase();
+        if (seen.has(key)) return new Error(`422 already_exists: "${name}"`);
+        seen.add(key);
+        return { data: {} };
+      };
+    })(),
+  });
+
+  await assert.doesNotReject(
+    runGithubScript(ensureLabelsScript(), {
+      github,
+      context: ctx,
+      env: { BACKPORT_BRANCHES: 'release/11.1 Release/11.1' },
+      templateVars: { 'inputs.delete_confusable': false },
+    }),
+  );
+
+  const created = github.callsTo('rest.issues.createLabel').map((c) => c.params.name.toLowerCase()).sort();
+  assert.deepEqual(created, ['backport release/11.1', 'backported release/11.1']);
+});
+
+test('ensure-labels: a case-colliding existing label never triggers createLabel (422-safe)', async () => {
+  // The case-insensitive keying must route a differently-cased existing label to
+  // updateLabel, never createLabel — so an injected 422 on create never fires.
+  const github = makeGithub({
+    'rest.issues.listLabelsForRepo': {
+      data: [READY, REVIEWED, FAILED, { ...DO_NOT_MERGE, name: 'DO NOT MERGE' }],
+    },
+    'rest.issues.createLabel': () => new Error('422 already_exists (should never be called)'),
+  });
+
+  await assert.doesNotReject(
+    runGithubScript(ensureLabelsScript(), {
+      github, context: ctx, templateVars: { 'inputs.delete_confusable': false },
+    }),
+    'a case-collision must go through updateLabel, not createLabel',
+  );
+  assert.equal(github.callsTo('rest.issues.createLabel').length, 0);
+  assert.equal(github.callsTo('rest.issues.updateLabel').length, 1);
 });
 
 // --------------------------------------------------------------------------

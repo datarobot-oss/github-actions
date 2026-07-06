@@ -34,6 +34,15 @@ jobs:
           # Get PRs with any label containing "ready for review" (case-insensitive)
           PRS_JSON=$(curl -s -H "Authorization: token $GH_TOKEN" \
             "https://api.github.com/repos/${REPO_NAME}/pulls?state=open&per_page=100")
+          # curl uses -s (not -f), so an API error (rate limit, 5xx, bad creds)
+          # arrives as a non-array body with exit 0. Left unchecked it would
+          # crash the jq filters below under `set -eo pipefail`. Normalize any
+          # non-array response to an empty list so the digest degrades to a
+          # no-op instead of red-X'ing the scheduled run.
+          if ! echo "$PRS_JSON" | jq -e 'type == "array"' >/dev/null 2>&1; then
+            echo "PRs API did not return an array (rate limited / error?); treating as empty."
+            PRS_JSON="[]"
+          fi
           echo "All open PRs (before filtering):"
           echo "$PRS_JSON" | jq -r '.[] | "Title: " + .title + " | Labels: " + ([.labels[].name] | join(", "))'
 
@@ -63,8 +72,20 @@ jobs:
           for PR_NUMBER in $PR_NUMBERS; do
             REVIEWS=$(curl -s -H "Authorization: token $GH_TOKEN" \
               "https://api.github.com/repos/${REPO_NAME}/pulls/${PR_NUMBER}/reviews")
+            # A rate-limited / errored reviews call returns a non-array body;
+            # treat it as "no reviews" so the approval jq below can't crash.
+            if ! echo "$REVIEWS" | jq -e 'type == "array"' >/dev/null 2>&1; then
+              echo "Reviews for PR #$PR_NUMBER unavailable (rate limited / error?); assuming none."
+              REVIEWS="[]"
+            fi
             PR_DETAIL=$(curl -s -H "Authorization: token $GH_TOKEN" \
               "https://api.github.com/repos/${REPO_NAME}/pulls/${PR_NUMBER}")
+            # Without a usable detail object we'd emit an all-null Slack line, so
+            # skip this PR entirely if the call errored or lacks a numeric id.
+            if ! echo "$PR_DETAIL" | jq -e 'type == "object" and (.number | type == "number")' >/dev/null 2>&1; then
+              echo "Detail for PR #$PR_NUMBER unavailable (rate limited / error?); skipping."
+              continue
+            fi
 
             # Take the latest APPROVED/CHANGES_REQUESTED review per reviewer;
             # COMMENTED reviews don't affect approval state so they're excluded.
@@ -98,6 +119,12 @@ jobs:
             # Issues events API is covered by pull-requests: read — no extra permissions needed.
             LABEL_EVENTS=$(curl -s -H "Authorization: token $GH_TOKEN" \
               "https://api.github.com/repos/${REPO_NAME}/issues/${PR_NUMBER}/events?per_page=100")
+            # A non-array (errored) events body would crash the labeled-at jq;
+            # fall back to "no events" so the PR still lists without a wait time.
+            if ! echo "$LABEL_EVENTS" | jq -e 'type == "array"' >/dev/null 2>&1; then
+              echo "Events for PR #$PR_NUMBER unavailable (rate limited / error?); omitting wait time."
+              LABEL_EVENTS="[]"
+            fi
             LABELED_AT=$(echo "$LABEL_EVENTS" | jq -r '
               [.[] | select(
                 .event == "labeled" and

@@ -92,8 +92,18 @@ jobs:
               { name: `backported ${branch}`, color: '0e8a16', description: `Backported to ${branch}.` },
             ]));
 
-            // Everything we intend to create/keep up to date.
-            const desired = [...CANONICAL, ...backportLabels];
+            // Everything we intend to create/keep up to date. De-duplicate by
+            // lower-cased name (GitHub label uniqueness is case-insensitive):
+            // duplicate input — the same branch listed twice, or two branches
+            // whose labels differ only in case — would otherwise queue the same
+            // label twice and the second createLabel would 422 "already_exists".
+            const desiredLower = new Set();
+            const desired = [...CANONICAL, ...backportLabels].filter(l => {
+              const key = l.name.toLowerCase();
+              if (desiredLower.has(key)) return false;
+              desiredLower.add(key);
+              return true;
+            });
 
             // Never delete these during cleanup even if a confusable pattern
             // somehow matched — the backport/release flow owns them.
@@ -106,21 +116,31 @@ jobs:
             const existing = await github.paginate(github.rest.issues.listLabelsForRepo, {
               owner, repo, per_page: 100,
             });
-            const byName = new Map(existing.map(l => [l.name, l]));
+            // GitHub treats label names as case-insensitive for uniqueness (but
+            // preserves the stored casing). Key the lookup by lowercased name so
+            // an existing label like "Do not merge" matches our canonical
+            // "do not merge" — otherwise we'd try to create it and hit a
+            // 422 "already_exists" collision.
+            const byName = new Map(existing.map(l => [l.name.toLowerCase(), l]));
 
-            // 2. Create each desired label, or align its colour/description.
+            // 2. Create each desired label, or align its name/colour/description.
             for (const label of desired) {
-              const current = byName.get(label.name);
+              const current = byName.get(label.name.toLowerCase());
               if (!current) {
                 await github.rest.issues.createLabel({
                   owner, repo, name: label.name, color: label.color, description: label.description,
                 });
                 core.info(`Created label "${label.name}"`);
-              } else if (current.color !== label.color || (current.description || '') !== label.description) {
+              } else if (
+                current.name !== label.name ||
+                current.color !== label.color ||
+                (current.description || '') !== label.description
+              ) {
                 await github.rest.issues.updateLabel({
-                  owner, repo, name: label.name, color: label.color, description: label.description,
+                  owner, repo, name: current.name, new_name: label.name,
+                  color: label.color, description: label.description,
                 });
-                core.info(`Updated label "${label.name}" (colour/description)`);
+                core.info(`Updated label "${current.name}" → "${label.name}" (name/colour/description)`);
               } else {
                 core.info(`Label "${label.name}" already up to date`);
               }
@@ -133,7 +153,7 @@ jobs:
             }
 
             for (const { name } of existing) {
-              if (desired.some(d => d.name === name)) continue;    // keep anything we manage
+              if (desiredLower.has(name.toLowerCase())) continue;  // keep anything we manage (incl. just-renamed casing)
               if (PROTECTED.test(name)) continue;                  // never touch backport/release labels
               const canonical = CANONICAL.find(c => c.confusable && c.confusable.test(name));
               if (!canonical) continue;

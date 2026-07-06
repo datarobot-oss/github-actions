@@ -75,6 +75,22 @@ test('release: next-version increments the patch', () => {
   assert.equal(nextVersion('0.0.0').outputs['new-version'], '0.0.1');
 });
 
+test('release: next-version handles a leading-zero patch (octal trap)', () => {
+  // Bash reads 08/09 as invalid octal; without a base-10 guard the increment
+  // silently fails and emits a duplicate version instead of bumping.
+  const r = nextVersion('1.2.08');
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(r.outputs['new-version'], '1.2.9');
+  assert.equal(nextVersion('1.2.09').outputs['new-version'], '1.2.10');
+  assert.equal(nextVersion('0.0.08').outputs['new-version'], '0.0.9');
+});
+
+test('release: next-version normalizes leading zeros in major/minor', () => {
+  // A malformed tag with leading zeros should still yield clean semver.
+  assert.equal(nextVersion('1.08.2').outputs['new-version'], '1.8.3');
+  assert.equal(nextVersion('1.2.007').outputs['new-version'], '1.2.8');
+});
+
 // --------------------------------------------------------------------------
 // mark-pr-to-review.yaml — single Slack notification payload
 // --------------------------------------------------------------------------
@@ -100,6 +116,45 @@ test('mark-pr-to-review: builds valid Slack JSON and is injection-safe', () => {
   const text = payload.blocks[0].text.text;
   assert.ok(text.includes(nastyTitle), 'title preserved verbatim, no shell expansion');
   assert.ok(text.includes('by alice'));
+});
+
+test('mark-pr-to-review: a failing Slack POST does not red-X the job', () => {
+  const script = runScript(loadWorkflow('mark-pr-to-review'), { name: 'Send notification to Slack' });
+  const r = runBash(script, {
+    env: {
+      __CURL_FAIL: '1', // simulate Slack 5xx / rate limit
+      SLACK_WEBHOOK_URL: 'https://hooks.slack.test/abc',
+      PR_NR: '123',
+      PR_URL: 'https://github.com/org/repo/pull/123',
+      PR_TITLE: 'A normal title',
+      PR_AUTHOR: 'alice',
+      PR_ADDITIONS: '10',
+      PR_DELETIONS: '3',
+      REPO_NAME: 'org/repo',
+    },
+  });
+  assert.equal(r.code, 0, 'a Slack outage must not fail the caller check');
+  assert.equal(r.posts.length, 1, 'the POST was still attempted');
+  assert.match(r.stderr, /continuing without failing the job/);
+});
+
+test('mark-pr-to-review: an empty webhook URL is skipped, not crashed on', () => {
+  const script = runScript(loadWorkflow('mark-pr-to-review'), { name: 'Send notification to Slack' });
+  const r = runBash(script, {
+    env: {
+      SLACK_WEBHOOK_URL: '',
+      PR_NR: '123',
+      PR_URL: 'https://github.com/org/repo/pull/123',
+      PR_TITLE: 'A normal title',
+      PR_AUTHOR: 'alice',
+      PR_ADDITIONS: '10',
+      PR_DELETIONS: '3',
+      REPO_NAME: 'org/repo',
+    },
+  });
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(r.posts.length, 0, 'no POST attempted without a webhook URL');
+  assert.match(r.stderr, /empty; skipping/);
 });
 
 // --------------------------------------------------------------------------
@@ -263,4 +318,104 @@ test('notify-slack: approved PR with a pending re-review request is re-surfaced'
   const records = JSON.parse(r.exportedEnv.PR_RECORDS);
   assert.equal(records.length, 1, 'approval is overridden by the pending re-review request');
   assert.equal(records[0].status_icon, ':yellow_pending:');
+});
+
+// --------------------------------------------------------------------------
+// notify-slack.yaml — API-error resilience. Every GET uses `curl -s` (not -f),
+// so a rate limit / 5xx / bad-creds response arrives as a non-array body with
+// exit 0. Under `set -eo pipefail` an unguarded jq filter on that body aborts
+// the whole scheduled run. These cover the shapes GitHub actually returns when
+// throttled ({"message": ...}) or when a call transiently fails (null/empty).
+// --------------------------------------------------------------------------
+test('notify-slack: fetch-prs survives a rate-limited (non-array) PRs response', () => {
+  const script = runScript(loadWorkflow('notify-slack'), { id: 'fetch-prs' });
+  const r = runBash(script, {
+    env: { GH_TOKEN: 'x', REPO_NAME: 'org/repo' },
+    curlFixtures: [{ match: 'pulls?state=open', body: { message: 'API rate limit exceeded' } }],
+  });
+  assert.equal(r.code, 0, 'a throttled PRs API must not crash the digest');
+  assert.equal(r.outputs['pr-numbers'].trim(), '', 'degrades to no PRs, not a red X');
+});
+
+test('notify-slack: fetch-prs survives an empty/null PRs response (5xx / network)', () => {
+  const script = runScript(loadWorkflow('notify-slack'), { id: 'fetch-prs' });
+  const r = runBash(script, {
+    env: { GH_TOKEN: 'x', REPO_NAME: 'org/repo' },
+    curlFixtures: [{ match: 'pulls?state=open', body: null }],
+  });
+  assert.equal(r.code, 0, 'a null body must not crash the iterate-over-array jq');
+  assert.equal(r.outputs['pr-numbers'].trim(), '');
+});
+
+test('notify-slack: build-pr-list survives a rate-limited reviews response', () => {
+  const script = runScript(loadWorkflow('notify-slack'), { id: 'build-pr-list' });
+  const now = sec('2026-06-30T00:00:00Z');
+  const fixtures = [
+    // reviews errored -> treat as "no approval" so the PR still surfaces.
+    { match: 'pulls/1/reviews', body: { message: 'API rate limit exceeded' } },
+    {
+      match: 'pulls/1',
+      body: {
+        number: 1, title: 'A', user: { login: 'alice' }, additions: 1, deletions: 1,
+        html_url: 'https://github.com/org/repo/pull/1', head: { sha: 'sha1' }, requested_reviewers: [],
+      },
+    },
+    { match: 'issues/1/events', body: [] },
+    { match: 'commits/sha1/status', body: { state: 'success' } },
+  ];
+  const r = runBash(script, {
+    env: { GH_TOKEN: 'x', REPO_NAME: 'org/repo', PR_NUMBERS: '1' },
+    now,
+    curlFixtures: fixtures,
+  });
+  assert.equal(r.code, 0, 'a throttled reviews call must not crash the approval jq');
+  const records = JSON.parse(r.exportedEnv.PR_RECORDS);
+  assert.equal(records.length, 1, 'unknown approval state keeps the PR in the digest');
+  assert.equal(records[0].number, 1);
+});
+
+test('notify-slack: build-pr-list skips a PR whose detail call errored', () => {
+  const script = runScript(loadWorkflow('notify-slack'), { id: 'build-pr-list' });
+  const now = sec('2026-06-30T00:00:00Z');
+  const fixtures = [
+    { match: 'pulls/1/reviews', body: [] },
+    // detail errored -> no numeric id, so the PR is skipped rather than
+    // emitting an all-null Slack line.
+    { match: 'pulls/1', body: { message: 'API rate limit exceeded' } },
+    { match: 'issues/1/events', body: [] },
+    { match: 'commits', body: { state: 'success' } },
+  ];
+  const r = runBash(script, {
+    env: { GH_TOKEN: 'x', REPO_NAME: 'org/repo', PR_NUMBERS: '1' },
+    now,
+    curlFixtures: fixtures,
+  });
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(JSON.parse(r.exportedEnv.PR_RECORDS), [], 'no garbage record for an unfetchable PR');
+});
+
+test('notify-slack: build-pr-list survives an errored events response (no wait time)', () => {
+  const script = runScript(loadWorkflow('notify-slack'), { id: 'build-pr-list' });
+  const now = sec('2026-06-30T00:00:00Z');
+  const fixtures = [
+    { match: 'pulls/1/reviews', body: [] },
+    {
+      match: 'pulls/1',
+      body: {
+        number: 1, title: 'A', user: { login: 'alice' }, additions: 1, deletions: 1,
+        html_url: 'https://github.com/org/repo/pull/1', head: { sha: 'sha1' }, requested_reviewers: [],
+      },
+    },
+    { match: 'issues/1/events', body: { message: 'Not Found' } },
+    { match: 'commits/sha1/status', body: { state: 'success' } },
+  ];
+  const r = runBash(script, {
+    env: { GH_TOKEN: 'x', REPO_NAME: 'org/repo', PR_NUMBERS: '1' },
+    now,
+    curlFixtures: fixtures,
+  });
+  assert.equal(r.code, 0, 'an errored events call must not crash the labeled-at jq');
+  const records = JSON.parse(r.exportedEnv.PR_RECORDS);
+  assert.equal(records.length, 1);
+  assert.equal(records[0].waiting, '', 'no labeled-at means no wait time, not a crash');
 });
