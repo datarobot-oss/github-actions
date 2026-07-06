@@ -62,24 +62,24 @@ jobs:
             const CANONICAL = [
               {
                 name: '00 - Ready for Review',
-                color: '0e8a16',
+                color: '1ac387',
                 description: 'PR is ready for team review — triggers the Slack notification & digest.',
                 confusable: /^(\d+\s*-\s*)?ready[ _-]*for[ _-]*review$/i,
               },
               {
                 name: '00 - Reviewed',
-                color: '5319e7',
+                color: 'd07dd3',
                 description: 'PR has been approved — excludes it from the ready-for-review digest.',
                 confusable: /^(\d+\s*-\s*)?reviewed$/i,
               },
               {
                 name: 'backport-failed',
-                color: 'd93f0b',
+                color: 'f4931d',
                 description: 'A backport cherry-pick hit a conflict and needs manual resolution.',
               },
               {
                 name: 'do not merge',
-                color: 'b60205',
+                color: 'ff0000',
                 description: 'Do not merge yet (e.g. CI has not run on a backport PR).',
               },
             ];
@@ -88,8 +88,8 @@ jobs:
             const backportBranches = (process.env.BACKPORT_BRANCHES || '')
               .split(/[\s,]+/).map(s => s.trim()).filter(Boolean);
             const backportLabels = backportBranches.flatMap(branch => ([
-              { name: `backport ${branch}`,   color: '1d76db', description: `Backport this PR to ${branch}.` },
-              { name: `backported ${branch}`, color: '0e8a16', description: `Backported to ${branch}.` },
+              { name: `backport ${branch}`,   color: '301b8e', description: `Backport this PR to ${branch}.` },
+              { name: `backported ${branch}`, color: '1ac387', description: `Backported to ${branch}.` },
             ]));
 
             // Everything we intend to create/keep up to date. De-duplicate by
