@@ -255,7 +255,7 @@ test('ensure-labels: updates a drifted label and leaves up-to-date ones alone', 
   const updated = github.callsTo('rest.issues.updateLabel');
   assert.equal(updated.length, 1, 'only the drifted label is updated');
   assert.equal(updated[0].params.name, '00 - Ready for Review');
-  assert.equal(updated[0].params.color, '0e8a16');
+  assert.equal(updated[0].params.color, '1ac387');
 });
 
 test('ensure-labels: a differently-cased existing label is renamed, not re-created', async () => {
@@ -304,7 +304,7 @@ test('ensure-labels: delete_confusable never deletes managed backport labels', a
     'rest.issues.listLabelsForRepo': {
       data: [
         READY, REVIEWED, FAILED, DO_NOT_MERGE,
-        { name: 'backport release/11.1', color: '1d76db', description: 'Backport this PR to release/11.1.' },
+        { name: 'backport release/11.1', color: '301b8e', description: 'Backport this PR to release/11.1.' },
       ],
     },
     'rest.issues.listForRepo': { data: [] },
