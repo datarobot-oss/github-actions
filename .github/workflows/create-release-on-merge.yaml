@@ -36,11 +36,17 @@ jobs:
           # Remove v prefix if present for version calculation
           VERSION="${LATEST_TAG#v}"
 
-          # Split version into parts
+          # Split version into parts. Force base-10 (10#) on every component:
+          # bash arithmetic treats a leading-zero value as octal, so a tag like
+          # 1.2.08 would make `$((PATCH + 1))` fail on the invalid octal digit.
+          # Under `set -e` that failing assignment is silently swallowed (it is
+          # not the last command in the step), leaving PATCH un-incremented and
+          # emitting a duplicate version. 10# also normalizes any stray leading
+          # zeros so the output is always clean semver.
           IFS='.' read -r -a VERSION_PARTS <<< "$VERSION"
-          MAJOR=${VERSION_PARTS[0]:-0}
-          MINOR=${VERSION_PARTS[1]:-0}
-          PATCH=${VERSION_PARTS[2]:-0}
+          MAJOR=$((10#${VERSION_PARTS[0]:-0}))
+          MINOR=$((10#${VERSION_PARTS[1]:-0}))
+          PATCH=$((10#${VERSION_PARTS[2]:-0}))
 
           # Increment patch version
           PATCH=$((PATCH + 1))

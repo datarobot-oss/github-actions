@@ -75,6 +75,22 @@ test('release: next-version increments the patch', () => {
   assert.equal(nextVersion('0.0.0').outputs['new-version'], '0.0.1');
 });
 
+test('release: next-version handles a leading-zero patch (octal trap)', () => {
+  // Bash reads 08/09 as invalid octal; without a base-10 guard the increment
+  // silently fails and emits a duplicate version instead of bumping.
+  const r = nextVersion('1.2.08');
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(r.outputs['new-version'], '1.2.9');
+  assert.equal(nextVersion('1.2.09').outputs['new-version'], '1.2.10');
+  assert.equal(nextVersion('0.0.08').outputs['new-version'], '0.0.9');
+});
+
+test('release: next-version normalizes leading zeros in major/minor', () => {
+  // A malformed tag with leading zeros should still yield clean semver.
+  assert.equal(nextVersion('1.08.2').outputs['new-version'], '1.8.3');
+  assert.equal(nextVersion('1.2.007').outputs['new-version'], '1.2.8');
+});
+
 // --------------------------------------------------------------------------
 // mark-pr-to-review.yaml — single Slack notification payload
 // --------------------------------------------------------------------------
