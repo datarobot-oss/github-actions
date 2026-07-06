@@ -16,15 +16,29 @@ jobs:
     steps:
       - name: Add "00 - Reviewed" label
         uses: actions/github-script@v7
+        env:
+          # Pass pr_number through the environment rather than inlining it into
+          # the script body. Inlining a caller-controlled value would let a
+          # non-numeric input break the script's syntax (or inject code); reading
+          # it here keeps it a plain data value regardless of contents.
+          PR_NUMBER: ${{ inputs.pr_number }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
+            // Number() (not parseInt) so a garbage value with a leading digit
+            // like "1 foo" is rejected as NaN rather than silently parsed to 1.
+            const prNumber = Number(process.env.PR_NUMBER);
+            if (!Number.isInteger(prNumber) || prNumber <= 0) {
+              core.setFailed(`Invalid pr_number: ${JSON.stringify(process.env.PR_NUMBER)}`);
+              return;
+            }
+
             // Labels are guaranteed to exist by the ensure-labels workflow, so a
             // failure here is a real problem (perms/config) and should surface as
             // a red check rather than be swallowed.
             await github.rest.issues.addLabels({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: ${{ inputs.pr_number }},
+              issue_number: prNumber,
               labels: ['00 - Reviewed']
             });

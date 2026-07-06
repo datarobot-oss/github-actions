@@ -148,13 +148,54 @@ test('mark-pr-reviewed: adds the "00 - Reviewed" label to the PR', async () => {
   await runGithubScript(script, {
     github,
     context: ctx,
-    templateVars: { 'inputs.pr_number': 314 },
+    env: { PR_NUMBER: '314' },
   });
 
   const labels = github.callsTo('rest.issues.addLabels');
   assert.equal(labels.length, 1);
   assert.equal(labels[0].params.issue_number, 314);
   assert.deepEqual(labels[0].params.labels, ['00 - Reviewed']);
+});
+
+test('mark-pr-reviewed: fails cleanly on an empty pr_number instead of a syntax error', async () => {
+  const script = githubScript(loadWorkflow('mark-pr-reviewed'), { name: 'Reviewed' });
+  const github = makeGithub();
+
+  // An empty value (e.g. a caller expression that resolved to nothing) must
+  // produce a clear core.setFailed, not crash the script body.
+  await assert.rejects(
+    runGithubScript(script, { github, context: ctx, env: { PR_NUMBER: '' } }),
+    /core\.setFailed: Invalid pr_number/,
+  );
+  assert.equal(github.callsTo('rest.issues.addLabels').length, 0, 'must not attempt to label');
+});
+
+test('mark-pr-reviewed: does not inline caller input into the script body (no injection)', async () => {
+  const script = githubScript(loadWorkflow('mark-pr-reviewed'), { name: 'Reviewed' });
+  const github = makeGithub();
+
+  // Were pr_number inlined into the source, this would break out and run
+  // arbitrary API calls. Read via process.env, it is inert data -> setFailed.
+  const evil = "1 }); await github.rest.issues.deleteLabel({ owner: 'x', repo: 'y', name: 'pwned' }); ({ issue_number: 1";
+  await assert.rejects(
+    runGithubScript(script, { github, context: ctx, env: { PR_NUMBER: evil } }),
+    /core\.setFailed: Invalid pr_number/,
+  );
+  assert.equal(github.callsTo('rest.issues.deleteLabel').length, 0, 'no injected call ran');
+  assert.equal(github.callsTo('rest.issues.addLabels').length, 0);
+});
+
+test('mark-pr-reviewed: a 404 from addLabels surfaces as a red check', async () => {
+  const script = githubScript(loadWorkflow('mark-pr-reviewed'), { name: 'Reviewed' });
+  const notFound = Object.assign(new Error('Not Found'), { status: 404 });
+  const github = makeGithub({ 'rest.issues.addLabels': notFound });
+
+  // By design the label is guaranteed to exist; a real failure (bad PR number,
+  // perms) should throw and fail the job rather than be swallowed.
+  await assert.rejects(
+    runGithubScript(script, { github, context: ctx, env: { PR_NUMBER: '314' } }),
+    /Not Found/,
+  );
 });
 
 // --------------------------------------------------------------------------
