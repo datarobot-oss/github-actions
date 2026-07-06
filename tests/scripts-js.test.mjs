@@ -71,6 +71,73 @@ test('add-jira-link: updates the existing bot comment instead of duplicating', a
   assert.equal(updated[0].params.comment_id, 99, 'updates the existing bot comment');
 });
 
+test('add-jira-link: tolerates a ghost-author comment (user: null)', async () => {
+  const script = githubScript(loadWorkflow('add-jira-link'), { name: 'Comment with Jira link' });
+  const github = makeGithub({
+    'rest.issues.listComments': {
+      data: [
+        { id: 1, user: null, body: 'comment from a deleted account' },
+        { id: 99, user: { type: 'Bot' }, body: '### 🎫 Jira Ticket\n\nold' },
+      ],
+    },
+  });
+
+  await runGithubScript(script, {
+    github,
+    context: ctx,
+    env: { TICKET_IDS: 'BUZZOK-9', PR_NUMBER: '7' },
+  });
+
+  // Must not crash on the null author, and still find/update the bot comment.
+  const updated = github.callsTo('rest.issues.updateComment');
+  assert.equal(updated.length, 1, 'still updates the existing bot comment');
+  assert.equal(updated[0].params.comment_id, 99);
+  assert.equal(github.callsTo('rest.issues.createComment').length, 0);
+});
+
+test('add-jira-link: tolerates a comment with a null body', async () => {
+  const script = githubScript(loadWorkflow('add-jira-link'), { name: 'Comment with Jira link' });
+  const github = makeGithub({
+    'rest.issues.listComments': {
+      data: [{ id: 1, user: { type: 'Bot' }, body: null }],
+    },
+  });
+
+  await runGithubScript(script, {
+    github,
+    context: ctx,
+    env: { TICKET_IDS: 'BUZZOK-9', PR_NUMBER: '7' },
+  });
+
+  // No existing Jira comment matched -> creates one, without crashing.
+  assert.equal(github.callsTo('rest.issues.createComment').length, 1);
+  assert.equal(github.callsTo('rest.issues.updateComment').length, 0);
+});
+
+test('add-jira-link: paginates so a comment on a later page is still found', async () => {
+  const script = githubScript(loadWorkflow('add-jira-link'), { name: 'Comment with Jira link' });
+  // paginate() in the fake unwraps `.data`; return a long list whose bot
+  // comment would sit past the first API page in production.
+  const many = Array.from({ length: 40 }, (_, i) => ({
+    id: i + 1,
+    user: { type: 'User' },
+    body: `chatter ${i}`,
+  }));
+  many.push({ id: 999, user: { type: 'Bot' }, body: '### 🎫 Jira Ticket\n\nold' });
+  const github = makeGithub({ 'rest.issues.listComments': { data: many } });
+
+  await runGithubScript(script, {
+    github,
+    context: ctx,
+    env: { TICKET_IDS: 'BUZZOK-9', PR_NUMBER: '7' },
+  });
+
+  const updated = github.callsTo('rest.issues.updateComment');
+  assert.equal(updated.length, 1, 'finds the bot comment across pages and updates it');
+  assert.equal(updated[0].params.comment_id, 999);
+  assert.equal(github.callsTo('rest.issues.createComment').length, 0);
+});
+
 // --------------------------------------------------------------------------
 // mark-pr-reviewed.yaml — "Add 00 - Reviewed label"
 // --------------------------------------------------------------------------
