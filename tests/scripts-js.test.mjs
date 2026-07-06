@@ -367,6 +367,86 @@ test('ensure-labels: mis-cased canonical + case-sensitive delete API does not cr
   );
 });
 
+test('ensure-labels: duplicate backport branches create each label once (no 422 double-create)', async () => {
+  // Regression: the same branch listed twice must not queue the same label
+  // twice — the second createLabel would 422 "already_exists" and crash.
+  const github = makeGithub({
+    'rest.issues.listLabelsForRepo': { data: [READY, REVIEWED, FAILED, DO_NOT_MERGE] },
+    // Model the real API: a duplicate create for an existing name rejects.
+    'rest.issues.createLabel': (() => {
+      const seen = new Set();
+      return ({ name }) => {
+        const key = name.toLowerCase();
+        if (seen.has(key)) return new Error(`422 already_exists: "${name}"`);
+        seen.add(key);
+        return { data: {} };
+      };
+    })(),
+  });
+
+  await assert.doesNotReject(
+    runGithubScript(ensureLabelsScript(), {
+      github,
+      context: ctx,
+      env: { BACKPORT_BRANCHES: 'release/11.1, release/11.1' },
+      templateVars: { 'inputs.delete_confusable': false },
+    }),
+    'duplicate input must not cause a double-create',
+  );
+
+  const created = github.callsTo('rest.issues.createLabel').map((c) => c.params.name).sort();
+  assert.deepEqual(created, ['backport release/11.1', 'backported release/11.1']);
+});
+
+test('ensure-labels: branches whose labels collide case-insensitively create each label once', async () => {
+  // Two distinct git branches ("release/11.1" vs "Release/11.1") produce labels
+  // that GitHub treats as the same (case-insensitive) — must still create once.
+  const github = makeGithub({
+    'rest.issues.listLabelsForRepo': { data: [READY, REVIEWED, FAILED, DO_NOT_MERGE] },
+    'rest.issues.createLabel': (() => {
+      const seen = new Set();
+      return ({ name }) => {
+        const key = name.toLowerCase();
+        if (seen.has(key)) return new Error(`422 already_exists: "${name}"`);
+        seen.add(key);
+        return { data: {} };
+      };
+    })(),
+  });
+
+  await assert.doesNotReject(
+    runGithubScript(ensureLabelsScript(), {
+      github,
+      context: ctx,
+      env: { BACKPORT_BRANCHES: 'release/11.1 Release/11.1' },
+      templateVars: { 'inputs.delete_confusable': false },
+    }),
+  );
+
+  const created = github.callsTo('rest.issues.createLabel').map((c) => c.params.name.toLowerCase()).sort();
+  assert.deepEqual(created, ['backport release/11.1', 'backported release/11.1']);
+});
+
+test('ensure-labels: a case-colliding existing label never triggers createLabel (422-safe)', async () => {
+  // The case-insensitive keying must route a differently-cased existing label to
+  // updateLabel, never createLabel — so an injected 422 on create never fires.
+  const github = makeGithub({
+    'rest.issues.listLabelsForRepo': {
+      data: [READY, REVIEWED, FAILED, { ...DO_NOT_MERGE, name: 'DO NOT MERGE' }],
+    },
+    'rest.issues.createLabel': () => new Error('422 already_exists (should never be called)'),
+  });
+
+  await assert.doesNotReject(
+    runGithubScript(ensureLabelsScript(), {
+      github, context: ctx, templateVars: { 'inputs.delete_confusable': false },
+    }),
+    'a case-collision must go through updateLabel, not createLabel',
+  );
+  assert.equal(github.callsTo('rest.issues.createLabel').length, 0);
+  assert.equal(github.callsTo('rest.issues.updateLabel').length, 1);
+});
+
 // --------------------------------------------------------------------------
 // backport.yaml — "Label & comment with backport result"
 // --------------------------------------------------------------------------
