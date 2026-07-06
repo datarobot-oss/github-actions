@@ -27,7 +27,12 @@ export function makeGithub(responses = {}) {
     async (params) => {
       calls.push({ method: key, params });
       const r = key in responses ? responses[key] : defaults[key];
-      return typeof r === 'function' ? r(params) : r;
+      const resolved = typeof r === 'function' ? r(params) : r;
+      // A stub may model a real API failure by returning (or resolving to) an
+      // Error — the script sees it as a rejected call, exactly like Octokit
+      // throwing a 404/422. This is how we exercise "does the Action crash?".
+      if (resolved instanceof Error) throw resolved;
+      return resolved;
     };
   const client = {
     calls,

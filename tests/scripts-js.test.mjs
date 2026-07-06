@@ -322,6 +322,51 @@ test('ensure-labels: delete_confusable migrates open PRs then deletes the wrong 
   assert.deepEqual(reviewedMigrations.map((c) => c.params.issue_number).sort(), [12, 34]);
 });
 
+test('ensure-labels: a mis-cased canonical review label is renamed but never deleted during cleanup', async () => {
+  // Regression: "00 - REVIEWED" is the SAME label as canonical "00 - Reviewed"
+  // (GitHub label uniqueness is case-insensitive). Step 2 renames it to
+  // canonical case; step 3 must not then treat the stale snapshot entry as a
+  // deletable confusable — doing so wipes the label it just repaired.
+  const github = makeGithub({
+    'rest.issues.listLabelsForRepo': {
+      data: [READY, { ...REVIEWED, name: '00 - REVIEWED' }, FAILED, DO_NOT_MERGE],
+    },
+    'rest.issues.listForRepo': { data: [] },
+  });
+  await runGithubScript(ensureLabelsScript(), {
+    github, context: ctx, templateVars: { 'inputs.delete_confusable': true },
+  });
+
+  const renamed = github.callsTo('rest.issues.updateLabel');
+  assert.equal(renamed.length, 1, 'only the mis-cased canonical is renamed');
+  assert.equal(renamed[0].params.name, '00 - REVIEWED');
+  assert.equal(renamed[0].params.new_name, '00 - Reviewed');
+
+  assert.equal(github.callsTo('rest.issues.deleteLabel').length, 0, 'the repaired canonical is never deleted');
+  assert.equal(github.callsTo('rest.issues.addLabels').length, 0, 'no bogus PR migration for a canonical label');
+});
+
+test('ensure-labels: mis-cased canonical + case-sensitive delete API does not crash the Action', async () => {
+  // GitHub's DELETE-label endpoint can be case-sensitive on lookup, so deleting
+  // the stale "00 - REVIEWED" name (already renamed to "00 - Reviewed") would
+  // 404 and reject — crashing the step. The cleanup must never issue that call.
+  const github = makeGithub({
+    'rest.issues.listLabelsForRepo': {
+      data: [READY, { ...REVIEWED, name: '00 - REVIEWED' }, FAILED, DO_NOT_MERGE],
+    },
+    'rest.issues.listForRepo': { data: [] },
+    'rest.issues.deleteLabel': ({ name }) =>
+      new Error(`404 Not Found: no label named "${name}"`),
+  });
+
+  await assert.doesNotReject(
+    runGithubScript(ensureLabelsScript(), {
+      github, context: ctx, templateVars: { 'inputs.delete_confusable': true },
+    }),
+    'the Action must not crash on a case-sensitive delete',
+  );
+});
+
 // --------------------------------------------------------------------------
 // backport.yaml — "Label & comment with backport result"
 // --------------------------------------------------------------------------

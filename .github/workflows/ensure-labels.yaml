@@ -94,6 +94,12 @@ jobs:
 
             // Everything we intend to create/keep up to date.
             const desired = [...CANONICAL, ...backportLabels];
+            // Lower-cased set of everything we manage. GitHub label uniqueness
+            // is case-insensitive, so cleanup must compare this way too — a
+            // label we just renamed into canonical case (e.g. "00 - REVIEWED" →
+            // "00 - Reviewed") is still the SAME label and must never be treated
+            // as a deletable confusable further down.
+            const desiredLower = new Set(desired.map(d => d.name.toLowerCase()));
 
             // Never delete these during cleanup even if a confusable pattern
             // somehow matched — the backport/release flow owns them.
@@ -143,7 +149,7 @@ jobs:
             }
 
             for (const { name } of existing) {
-              if (desired.some(d => d.name === name)) continue;    // keep anything we manage
+              if (desiredLower.has(name.toLowerCase())) continue;  // keep anything we manage (incl. just-renamed casing)
               if (PROTECTED.test(name)) continue;                  // never touch backport/release labels
               const canonical = CANONICAL.find(c => c.confusable && c.confusable.test(name));
               if (!canonical) continue;
