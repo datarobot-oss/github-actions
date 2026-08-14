@@ -10,6 +10,8 @@ Entries below 0.0.19 were backfilled from the
 [GitHub releases](https://github.com/datarobot-oss/github-actions/releases) and are summarized rather
 than exhaustive.
 
+## Unreleased
+
 ## [0.0.19] - 2026-08-14
 
 ### Added
