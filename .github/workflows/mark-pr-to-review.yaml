@@ -1,8 +1,18 @@
-name: Notify GenAI team on "Ready for review" PRs
+name: 'Notify Slack: PR ready for review'
 
 on:
   workflow_call:
     inputs:
+      slack_mention:
+        description: >-
+          Optional Slack mention to prefix the message with, e.g. `@some-team`
+          or `<!subteam^S0123ABCD>`. Set it in your own caller; left empty the
+          message is posted without a mention. Slack only resolves a literal
+          `@name` if a user or user group by that name exists in the receiving
+          workspace, so a group handle from another workspace posts as plain text.
+        required: false
+        default: ''
+        type: string
       pr_number:
         description: 'PR number, shown in the Slack message. Usually `github.event.pull_request.number`.'
         required: true
@@ -48,6 +58,7 @@ jobs:
       - name: Send notification to Slack
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_MENTION: ${{ inputs.slack_mention }}
           PR_NR: ${{ inputs.pr_number }}
           PR_URL: ${{ inputs.pr_url }}
           PR_TITLE: ${{ inputs.pr_title }}
@@ -59,6 +70,7 @@ jobs:
           # Build the Slack payload via jq so PR-controlled fields can never
           # break out of JSON string context regardless of their contents.
           PAYLOAD=$(jq -n \
+            --arg mention "$SLACK_MENTION" \
             --arg pr_nr "$PR_NR" \
             --arg pr_url "$PR_URL" \
             --arg pr_title "$PR_TITLE" \
@@ -72,7 +84,9 @@ jobs:
                 type: "section",
                 text: {
                   type: "mrkdwn",
-                  text: ("@buzok-team: :rocket: PR by " + $pr_author + " needs a review:\n<" + $pr_url + "|" + $repo_name + "#" + $pr_nr + ": " + $pr_title + "> `+" + $pr_additions + " -" + $pr_deletions + "`")
+                  # An unset mention contributes nothing rather than a stray
+                  # ": " prefix, so the default output reads as a clean sentence.
+                  text: ((if $mention == "" then "" else $mention + ": " end) + ":rocket: PR by " + $pr_author + " needs a review:\n<" + $pr_url + "|" + $repo_name + "#" + $pr_nr + ": " + $pr_title + "> `+" + $pr_additions + " -" + $pr_deletions + "`")
                 }
               }]
             }')

@@ -7,6 +7,8 @@
 
 
 <!--
+DataRobot contributors only — skip this if you do not have Jira access.
+
 !!! You can include the JIRA-12345 ticket ID in your branch name or
 PR title to automatically have it commented on your PR !!!
 --------------------

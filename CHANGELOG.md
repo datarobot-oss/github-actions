@@ -15,6 +15,40 @@ than exhaustive.
 
 ## Unreleased
 
+
+## 0.0.20 - 2026-08-14
+- `add-jira-link` takes a `jira_base_url` input. The DataRobot Jira host used to be hardcoded in the
+  middle of the comment-building script, so every consumer posted links only DataRobot staff could
+  open while the generic `[ABC-1234]` ticket regex made the workflow look portable. The input still
+  defaults to the DataRobot tenant, so nothing changes for existing consumers, but it is now a
+  documented knob set in your copy of the example. Set it to `''` to skip the Jira comment entirely.
+- `mark-pr-to-review` takes an optional `slack_mention` input, default empty. The Slack handle
+  `@buzok-team` was hardcoded into the message body, which meant every consuming repo broadcast a
+  DataRobot team handle into its own Slack channel. This repo's own caller now sets it; everyone else
+  gets a clean message with no mention unless they ask for one.
+- `notify-slack` takes `status_icon_success`, `status_icon_failure`, and `status_icon_pending` inputs.
+  The digest's CI-status column used three emoji that only exist in DataRobot's Slack workspace, so in
+  any other workspace every status line rendered as literal `:yellow_pending:` text. The defaults are
+  now Slack built-ins that exist everywhere, and this repo's caller opts back into the custom set.
+- The three inputs above ship commented out in `examples/workflow-pr-automation.yaml`, because the
+  examples pin `@0.0.18` and that release does not declare them. Passing a reusable workflow an input
+  its pinned version does not declare fails the run, so a copy-pasted example would have red-X'd on
+  every PR open, edit, and cron tick. Each is shown at its default, so bumping the `uses:` refs to a
+  release that declares them and uncommenting changes no behavior on its own.
+- Renamed two reusable workflows that shared the display name
+  `Notify GenAI team on "Ready for review" PRs`, which is the string rendered in every consuming
+  repo's Actions tab. They are now `Notify Slack: PR ready for review` and
+  `Notify Slack: open PR digest`, which say what they do and name no internal team. The
+  `ensure-labels` trigger wrapper and its example are now `Ensure Labels`, so they no longer collide
+  with the reusable workflow they call.
+- `docs/BACKPORT.md` no longer ends on a `TODO` admitting the recommended GitHub App credentials were
+  never set up in this repo, twenty lines after telling adopters to set them up. The gap is real and
+  needs org-admin access, so it is now tracked in
+  [issue #24](https://github.com/datarobot-oss/github-actions/issues/24) and the doc explains that
+  both paths work.
+- Added a `Configuration` section to `README.md` covering the inputs above: what each defaults to and
+  when a consumer needs to change it.
+
 ## 0.0.19 - 2026-08-14
 
 - Every action reference is pinned to a full commit SHA with the version in a trailing comment, and

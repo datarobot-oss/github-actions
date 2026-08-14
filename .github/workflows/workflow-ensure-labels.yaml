@@ -1,4 +1,4 @@
-name: Ensure PR-automation labels
+name: Ensure Labels
 
 # Dogfoods the ensure-labels reusable workflow in THIS repo. Downstream repos
 # should copy examples/workflow-ensure-labels.yaml instead (it pins @version).

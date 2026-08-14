@@ -29,6 +29,9 @@ jobs:
     if: github.event_name == 'pull_request' && contains(github.event.label.name, 'ready for review')
     uses: ./.github/workflows/mark-pr-to-review.yaml
     with:
+      # DataRobot-workspace specific, which is why it lives in this caller and
+      # not in the reusable workflow: the handle means nothing anywhere else.
+      slack_mention: '@buzok-team'
       pr_number: ${{ github.event.pull_request.number }}
       pr_url: ${{ github.event.pull_request.html_url }}
       pr_title: ${{ github.event.pull_request.title }}
@@ -56,6 +59,13 @@ jobs:
   notify-slack-scheduled:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     uses: ./.github/workflows/notify-slack.yaml
+    with:
+      # Custom emoji installed in DataRobot's Slack workspace. They render as
+      # literal `:name:` text in any other workspace, so the reusable workflow
+      # defaults to Slack's built-ins and these are opted into here.
+      status_icon_success: ':green_with_check:'
+      status_icon_failure: ':red_with_cross:'
+      status_icon_pending: ':yellow_pending:'
     secrets:
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
     permissions:

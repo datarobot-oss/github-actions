@@ -1,4 +1,4 @@
-name: Notify GenAI team on "Ready for review" PRs
+name: 'Notify Slack: open PR digest'
 
 on:
   workflow_call:
@@ -7,6 +7,25 @@ on:
         description: 'Slack emoji name (without colons) to use as the header icon, e.g. "clipboard" or "mega"'
         required: false
         default: 'clipboard'
+        type: string
+      # The three status icons below default to Slack's built-in emoji, which
+      # exist in every workspace. Custom emoji are per-workspace: a name that
+      # is not installed renders as the literal `:name:` text, so a nicer icon
+      # set has to be opted into by the caller rather than baked in here.
+      status_icon_success:
+        description: 'Slack emoji (with colons) for a PR whose CI passed.'
+        required: false
+        default: ':white_check_mark:'
+        type: string
+      status_icon_failure:
+        description: 'Slack emoji (with colons) for a PR whose CI failed or errored.'
+        required: false
+        default: ':x:'
+        type: string
+      status_icon_pending:
+        description: 'Slack emoji (with colons) for a PR whose CI is pending or has no status.'
+        required: false
+        default: ':hourglass_flowing_sand:'
         type: string
     secrets:
       SLACK_WEBHOOK_URL:
@@ -67,6 +86,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO_NAME: ${{ github.repository }}
           PR_NUMBERS: ${{ steps.fetch-prs.outputs.pr-numbers }}
+          STATUS_ICON_SUCCESS: ${{ inputs.status_icon_success }}
+          STATUS_ICON_FAILURE: ${{ inputs.status_icon_failure }}
+          STATUS_ICON_PENDING: ${{ inputs.status_icon_pending }}
         run: |
           # Build a JSON array of PR records — PR-controlled strings (title,
           # author) stay inside JSON the whole way, never touching the shell.
@@ -138,10 +160,12 @@ jobs:
             HEAD_SHA=$(echo "$PR_DETAIL" | jq -r '.head.sha')
             STATUS=$(curl -s -H "Authorization: token $GH_TOKEN" \
               "https://api.github.com/repos/${REPO_NAME}/commits/${HEAD_SHA}/status" | jq -r '.state')
+            # `:-` so an explicitly-empty input still yields a visible icon
+            # rather than a line that silently loses its status column.
             case "$STATUS" in
-              success)        STATUS_ICON=":green_with_check:" ;;
-              failure|error)  STATUS_ICON=":red_with_cross:" ;;
-              *)               STATUS_ICON=":yellow_pending:" ;;
+              success)        STATUS_ICON="${STATUS_ICON_SUCCESS:-:white_check_mark:}" ;;
+              failure|error)  STATUS_ICON="${STATUS_ICON_FAILURE:-:x:}" ;;
+              *)              STATUS_ICON="${STATUS_ICON_PENDING:-:hourglass_flowing_sand:}" ;;
             esac
 
             WAITING=""

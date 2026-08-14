@@ -9,6 +9,11 @@ import { makeGithub, runGithubScript } from './helpers/github-script.mjs';
 
 const ctx = { repo: { owner: 'datarobot-oss', repo: 'demo' } };
 
+// add-jira-link's `jira_base_url` input has a default, but the harness extracts
+// the script body only and does not evaluate `with:` defaults, so every call
+// site has to pass it the way GitHub would.
+const JIRA_BASE_URL = 'https://datarobot.atlassian.net/browse';
+
 // --------------------------------------------------------------------------
 // add-jira-link.yaml — "Comment with Jira link"
 // --------------------------------------------------------------------------
@@ -19,7 +24,7 @@ test('add-jira-link: single ticket creates a singular comment', async () => {
   await runGithubScript(script, {
     github,
     context: ctx,
-    env: { TICKET_IDS: 'BUZZOK-123', PR_NUMBER: '42' },
+    env: { TICKET_IDS: 'BUZZOK-123', PR_NUMBER: '42', JIRA_BASE_URL },
   });
 
   const created = github.callsTo('rest.issues.createComment');
@@ -32,6 +37,38 @@ test('add-jira-link: single ticket creates a singular comment', async () => {
   assert.doesNotMatch(body, /^- /m, 'single ticket should not be a bullet list');
 });
 
+// The whole point of the input is that a non-DataRobot consumer gets links its
+// own readers can open. If this regresses, the workflow is portable in name only.
+test('add-jira-link: a consumer-supplied jira_base_url replaces the default host', async () => {
+  const script = githubScript(loadWorkflow('add-jira-link'), { name: 'Comment with Jira link' });
+  const github = makeGithub();
+
+  await runGithubScript(script, {
+    github,
+    context: ctx,
+    env: { TICKET_IDS: 'ACME-9', PR_NUMBER: '3', JIRA_BASE_URL: 'https://acme.atlassian.net/browse' },
+  });
+
+  const { body } = github.callsTo('rest.issues.createComment')[0].params;
+  assert.match(body, /\[ACME-9\]\(https:\/\/acme\.atlassian\.net\/browse\/ACME-9\)/);
+  assert.doesNotMatch(body, /datarobot/i, 'no DataRobot host leaks into a consumer comment');
+});
+
+test('add-jira-link: a trailing slash on jira_base_url does not double up', async () => {
+  const script = githubScript(loadWorkflow('add-jira-link'), { name: 'Comment with Jira link' });
+  const github = makeGithub();
+
+  await runGithubScript(script, {
+    github,
+    context: ctx,
+    env: { TICKET_IDS: 'ACME-9', PR_NUMBER: '3', JIRA_BASE_URL: 'https://acme.atlassian.net/browse/' },
+  });
+
+  const { body } = github.callsTo('rest.issues.createComment')[0].params;
+  assert.match(body, /\(https:\/\/acme\.atlassian\.net\/browse\/ACME-9\)/);
+  assert.doesNotMatch(body, /browse\/\/ACME-9/, 'trailing slash is normalized away');
+});
+
 test('add-jira-link: multiple tickets render a bulleted, pluralized list', async () => {
   const script = githubScript(loadWorkflow('add-jira-link'), { name: 'Comment with Jira link' });
   const github = makeGithub();
@@ -39,7 +76,7 @@ test('add-jira-link: multiple tickets render a bulleted, pluralized list', async
   await runGithubScript(script, {
     github,
     context: ctx,
-    env: { TICKET_IDS: 'BUZZOK-1,BUZZOK-2', PR_NUMBER: '7' },
+    env: { TICKET_IDS: 'BUZZOK-1,BUZZOK-2', PR_NUMBER: '7', JIRA_BASE_URL },
   });
 
   const { body } = github.callsTo('rest.issues.createComment')[0].params;
@@ -62,7 +99,7 @@ test('add-jira-link: updates the existing bot comment instead of duplicating', a
   await runGithubScript(script, {
     github,
     context: ctx,
-    env: { TICKET_IDS: 'BUZZOK-9', PR_NUMBER: '7' },
+    env: { TICKET_IDS: 'BUZZOK-9', PR_NUMBER: '7', JIRA_BASE_URL },
   });
 
   assert.equal(github.callsTo('rest.issues.createComment').length, 0, 'should not create');
@@ -85,7 +122,7 @@ test('add-jira-link: tolerates a ghost-author comment (user: null)', async () =>
   await runGithubScript(script, {
     github,
     context: ctx,
-    env: { TICKET_IDS: 'BUZZOK-9', PR_NUMBER: '7' },
+    env: { TICKET_IDS: 'BUZZOK-9', PR_NUMBER: '7', JIRA_BASE_URL },
   });
 
   // Must not crash on the null author, and still find/update the bot comment.
@@ -106,7 +143,7 @@ test('add-jira-link: tolerates a comment with a null body', async () => {
   await runGithubScript(script, {
     github,
     context: ctx,
-    env: { TICKET_IDS: 'BUZZOK-9', PR_NUMBER: '7' },
+    env: { TICKET_IDS: 'BUZZOK-9', PR_NUMBER: '7', JIRA_BASE_URL },
   });
 
   // No existing Jira comment matched -> creates one, without crashing.
@@ -129,7 +166,7 @@ test('add-jira-link: paginates so a comment on a later page is still found', asy
   await runGithubScript(script, {
     github,
     context: ctx,
-    env: { TICKET_IDS: 'BUZZOK-9', PR_NUMBER: '7' },
+    env: { TICKET_IDS: 'BUZZOK-9', PR_NUMBER: '7', JIRA_BASE_URL },
   });
 
   const updated = github.callsTo('rest.issues.updateComment');

@@ -123,5 +123,8 @@ org-controlled accounts. Steps:
 Once those secrets exist, backport PRs are opened by `datarobot-backport-bot[bot]`
 and CI runs on them automatically. Until then, the workflow uses `GITHUB_TOKEN`.
 
-> **TODO (tracked separately):** open a ticket to stand up the org GitHub App and
-> add the two secrets. Until it lands we run on the `GITHUB_TOKEN` fallback.
+> [!NOTE]
+> This repo currently runs on the `GITHUB_TOKEN` fallback. Standing up the App is
+> tracked in [issue #24](https://github.com/datarobot-oss/github-actions/issues/24).
+> It changes nothing for consumers either way: both paths work, and the fallback
+> only costs you an empty commit per backport PR to kick CI.
