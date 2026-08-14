@@ -36,11 +36,12 @@ jobs:
     if: github.event_name == 'pull_request' && contains(github.event.label.name, 'ready for review')
     uses: datarobot-oss/github-actions/.github/workflows/mark-pr-to-review.yaml@0.0.18
     with:
-      # Optional. Prefixes the Slack message with a mention so reviewers get
-      # pinged instead of having to watch the channel. Uncomment and set to a
-      # user group that exists in YOUR workspace; a handle Slack cannot resolve
-      # posts as plain text. Omit it for no mention.
-      # slack_mention: '@your-team'
+      # Prefixes the Slack message with a mention, so reviewers get pinged rather
+      # than having to watch the channel. Set it to a user group that exists in
+      # YOUR workspace, e.g. '@platform-team' or '<!subteam^S0123ABCD>'. Slack
+      # renders a handle it cannot resolve as plain text, so a group name copied
+      # from another workspace pings nobody. Left empty, no mention is added.
+      slack_mention: ''
       pr_number: ${{ github.event.pull_request.number }}
       pr_url: ${{ github.event.pull_request.html_url }}
       pr_title: ${{ github.event.pull_request.title }}
@@ -74,12 +75,13 @@ jobs:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     uses: datarobot-oss/github-actions/.github/workflows/notify-slack.yaml@0.0.18
     with:
-      # Optional. Per-PR CI status icons in the digest. The defaults are Slack
-      # built-ins that exist in every workspace; override them with custom emoji
-      # your own workspace has installed.
-      # status_icon_success: ':white_check_mark:'
-      # status_icon_failure: ':x:'
-      # status_icon_pending: ':hourglass_flowing_sand:'
+      # Per-PR CI status icons in the digest. These are Slack built-ins, so they
+      # render in every workspace. Swap in custom emoji your own workspace has
+      # installed if you prefer; a custom name that is not installed shows up as
+      # literal ':name:' text.
+      status_icon_success: ':white_check_mark:'
+      status_icon_failure: ':x:'
+      status_icon_pending: ':hourglass_flowing_sand:'
       header_icon: 'clipboard'
     secrets:
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
