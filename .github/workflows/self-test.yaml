@@ -18,10 +18,12 @@ jobs:
     name: Lint workflows
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       # Bundles shellcheck, so inline `run:` scripts are shellchecked too.
-      # Pinned so a new actionlint release can't fail CI without a deliberate bump.
-      - uses: docker://rhysd/actionlint:1.7.12
+      # Pinned by digest, not tag: a Docker tag is mutable, so `:1.7.12` could be
+      # repointed at new content by the publisher. Keep the tag in the comment so
+      # the version is still readable, and bump both together.
+      - uses: docker://rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 # 1.7.12
         with:
           args: -color
 
@@ -29,22 +31,47 @@ jobs:
     name: Unit tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
       - run: npm ci
       - run: npm test
 
-  # Every PR must record what changed, because consumers pin this repo by tag and
-  # the release notes are the only thing telling them whether a bump is safe.
-  # Apply the `skip-changelog` label for changes with no consumer-visible effect.
-  changelog:
-    name: Changelog updated
-    if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'skip-changelog')
+  # Second line of defence behind GitHub's native secret scanning + push
+  # protection, which is enabled on this repo. That catches provider-recognised
+  # patterns at push time; gitleaks catches the shapes GitHub does not know
+  # about, and catches them on the PR rather than after the push.
+  #
+  # Run as a container rather than gitleaks/gitleaks-action: that Action requires
+  # a paid GITLEAKS_LICENSE for organisation-owned repos, which would fail CI.
+  # The upstream image has no such restriction. Digest-pinned like actionlint.
+  secret-scan:
+    name: Secret scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      # `dir` scans the checked-out tree. History is covered by push protection,
+      # so a shallow checkout is fine and keeps this job fast.
+      - uses: docker://ghcr.io/gitleaks/gitleaks@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f # v8.30.1
+        with:
+          args: dir /github/workspace --no-banner --redact --verbose
+
+  # Every PR must record what changed, because consumers pin this repo by tag and
+  # the release notes are the only thing telling them whether a bump is safe.
+  # Two escapes: the `skip-changelog` label for changes with no consumer-visible
+  # effect, and an automatic pass for bot PRs (Dependabot cannot edit the
+  # changelog, and its PR title already lands in the release notes).
+  changelog:
+    name: Changelog updated
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.actor != 'dependabot[bot]' &&
+      github.actor != 'github-actions[bot]' &&
+      !contains(github.event.pull_request.labels.*.name, 'skip-changelog')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           # Full history so the merge-base with the target branch is available.
           fetch-depth: 0

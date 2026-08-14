@@ -64,7 +64,17 @@ tab. It creates the labels the other workflows depend on, and it is idempotent, 
 safe. Add any [secrets](#secrets) the workflow you chose needs.
 
 To upgrade later, bump the `@0.0.18` ref in the `uses:` lines to a newer
-[tag](https://github.com/datarobot-oss/github-actions/tags).
+[tag](https://github.com/datarobot-oss/github-actions/tags), and read the
+[changelog](CHANGELOG.md) first.
+
+> [!TIP]
+> A git tag is a movable reference, so `@0.0.18` is a convenience, not a guarantee.
+> If you want the ref to be immutable, pin the commit SHA instead and keep the
+> version in a comment, the same way this repo pins its own dependencies:
+>
+> ```yaml
+> uses: datarobot-oss/github-actions/.github/workflows/backport.yaml@<full-sha>  # 0.0.18
+> ```
 
 # Available workflows
 

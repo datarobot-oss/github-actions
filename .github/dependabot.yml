@@ -1,0 +1,62 @@
+# Dependabot version updates.
+# https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+#
+# Two ecosystems are present in this repo:
+#
+#   github-actions — the `uses:` refs in .github/workflows/. This is the one that
+#     matters most here: this repo IS an Actions supply chain, and every action is
+#     now SHA-pinned, so without Dependabot a pinned SHA would never get bumped
+#     for a security fix. It also covers the `docker://` action reference in
+#     self-test.yaml.
+#   npm — package.json / package-lock.json for the self-test harness (dev-only,
+#     never published or consumed downstream).
+#
+# Deliberately NOT configured:
+#   docker — that ecosystem scans Dockerfiles and compose files, of which this
+#     repo has none. The one container image we use is a `docker://` action ref,
+#     which the github-actions ecosystem already covers.
+#
+# NOTE: the actionlint digest is duplicated in Taskfile.yml so `task lint` matches
+# CI exactly. Dependabot cannot see a shell command, so when it opens a PR for the
+# self-test.yaml digest, update Taskfile.yml in the same PR.
+
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "chore(actions)"
+    groups:
+      # First-party GitHub actions move together and are low-risk, so one PR for
+      # all of them keeps the review queue short.
+      actions-official:
+        patterns:
+          - "actions/*"
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      # Major bumps change behaviour and inputs, so they should be a deliberate,
+      # separately-reviewed change rather than an automated PR.
+      - dependency-name: "actions/*"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "chore(npm)"
+    groups:
+      dev-dependencies:
+        dependency-type: "development"

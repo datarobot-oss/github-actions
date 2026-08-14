@@ -14,16 +14,44 @@ than exhaustive.
 
 ### Added
 
-- `CHANGELOG.md`, plus a CI check that requires every pull request to update it.
+- `CHANGELOG.md`, plus a CI check that requires every pull request to update it. Bot PRs and PRs
+  labelled `skip-changelog` are exempt.
+- `.github/dependabot.yml` covering `github-actions` and `npm`. The `github-actions` ecosystem is the
+  one that matters here: every action is now SHA-pinned, so without Dependabot a pinned SHA would
+  never be bumped for a security fix.
+- `Secret scan` CI job running gitleaks on every PR, as a second line behind GitHub's native secret
+  scanning and push protection.
+- `.pre-commit-config.yaml` with gitleaks and `detect-private-key`, mirroring the CI job so a local
+  pass and a CI pass mean the same thing.
+- `.github/workflows/trivy-scan.yaml` for dependency CVEs and workflow misconfiguration, on relevant
+  PRs and weekly.
 
 ### Changed
 
 - Rewrote `README.md` for external consumers: quick start with a copy-pasteable command, a table of
   the four example workflows with their triggers and secrets, and a secrets reference. Contributor
-  instructions moved to their own section.
+  instructions moved to their own section. Documented SHA-pinning for consumers who want an immutable
+  reference, since a git tag is movable.
 - `.github/CODEOWNERS` now names `@datarobot-oss/buzok`. The previous entries pointed at teams in
   other orgs, which GitHub resolves to nothing, so code-owner review was enforcing no owner.
 - Examples now pin `@0.0.18` instead of `@0.0.16`.
+
+### Security
+
+- Every action reference is pinned to a full commit SHA with the version in a trailing comment, and
+  the actionlint container is pinned by digest in both CI and `Taskfile.yml`. Previously
+  `korthout/backport-action@v3` and `softprops/action-gh-release@v2` sat on mutable third-party tags
+  while holding write tokens, and the release action runs unattended on every push to `main`. Pins
+  resolve to the same versions those tags pointed at, so behaviour is unchanged.
+- The backport workflow now refuses pull requests whose head branch lives in a fork
+  (`head.repo.full_name == github.repository`), and its `prepare` job declares
+  `permissions: contents: read` instead of inheriting the caller's default token. `pull_request_target`
+  grants write access and secrets, and the previous justification for it assumed an internal repo.
+  Both the reusable wrapper and `examples/workflow-backport.yaml` carry the guard and the reasoning,
+  so the warning now travels with every copy.
+- `notify-slack` passes `header_icon` through the step environment instead of interpolating it into
+  the shell, and `ensure-labels` does the same for `delete_confusable`. Both were the last remaining
+  cases of a caller-supplied value reaching a script body directly.
 
 ### Fixed
 

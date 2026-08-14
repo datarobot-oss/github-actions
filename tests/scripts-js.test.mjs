@@ -232,7 +232,7 @@ const DO_NOT_MERGE = {
 test('ensure-labels: creates all four fixed canonical labels when none exist', async () => {
   const github = makeGithub({ 'rest.issues.listLabelsForRepo': { data: [] } });
   await runGithubScript(ensureLabelsScript(), {
-    github, context: ctx, templateVars: { 'inputs.delete_confusable': false },
+    github, context: ctx, env: { DELETE_CONFUSABLE: 'false' },
   });
 
   const created = github.callsTo('rest.issues.createLabel').map((c) => c.params.name).sort();
@@ -248,7 +248,7 @@ test('ensure-labels: updates a drifted label and leaves up-to-date ones alone', 
     },
   });
   await runGithubScript(ensureLabelsScript(), {
-    github, context: ctx, templateVars: { 'inputs.delete_confusable': false },
+    github, context: ctx, env: { DELETE_CONFUSABLE: 'false' },
   });
 
   assert.equal(github.callsTo('rest.issues.createLabel').length, 0, 'all already exist');
@@ -268,7 +268,7 @@ test('ensure-labels: a differently-cased existing label is renamed, not re-creat
     },
   });
   await runGithubScript(ensureLabelsScript(), {
-    github, context: ctx, templateVars: { 'inputs.delete_confusable': false },
+    github, context: ctx, env: { DELETE_CONFUSABLE: 'false' },
   });
 
   assert.equal(github.callsTo('rest.issues.createLabel').length, 0, 'no collision-inducing create');
@@ -285,8 +285,7 @@ test('ensure-labels: backport_branches creates backport + backported label pairs
   await runGithubScript(ensureLabelsScript(), {
     github,
     context: ctx,
-    env: { BACKPORT_BRANCHES: 'release/11.1, release/11.2' },
-    templateVars: { 'inputs.delete_confusable': false },
+    env: { BACKPORT_BRANCHES: 'release/11.1, release/11.2', DELETE_CONFUSABLE: 'false' },
   });
 
   // Fixed labels already exist -> only the four per-branch labels are created.
@@ -312,8 +311,7 @@ test('ensure-labels: delete_confusable never deletes managed backport labels', a
   await runGithubScript(ensureLabelsScript(), {
     github,
     context: ctx,
-    env: { BACKPORT_BRANCHES: 'release/11.1' },
-    templateVars: { 'inputs.delete_confusable': true },
+    env: { BACKPORT_BRANCHES: 'release/11.1', DELETE_CONFUSABLE: 'true' },
   });
 
   assert.equal(github.callsTo('rest.issues.deleteLabel').length, 0, 'backport labels survive cleanup');
@@ -324,7 +322,7 @@ test('ensure-labels: with delete_confusable=false, confusable variants are left 
     'rest.issues.listLabelsForRepo': { data: [READY, REVIEWED, { name: 'Ready for Review', color: 'ccc', description: '' }] },
   });
   await runGithubScript(ensureLabelsScript(), {
-    github, context: ctx, templateVars: { 'inputs.delete_confusable': false },
+    github, context: ctx, env: { DELETE_CONFUSABLE: 'false' },
   });
 
   assert.equal(github.callsTo('rest.issues.deleteLabel').length, 0);
@@ -347,7 +345,7 @@ test('ensure-labels: delete_confusable migrates open PRs then deletes the wrong 
     'rest.issues.listForRepo': { data: [{ number: 12 }, { number: 34 }] },
   });
   await runGithubScript(ensureLabelsScript(), {
-    github, context: ctx, templateVars: { 'inputs.delete_confusable': true },
+    github, context: ctx, env: { DELETE_CONFUSABLE: 'true' },
   });
 
   // Only the two confusable variants are deleted; protected/unrelated survive.
@@ -375,7 +373,7 @@ test('ensure-labels: a mis-cased canonical review label is renamed but never del
     'rest.issues.listForRepo': { data: [] },
   });
   await runGithubScript(ensureLabelsScript(), {
-    github, context: ctx, templateVars: { 'inputs.delete_confusable': true },
+    github, context: ctx, env: { DELETE_CONFUSABLE: 'true' },
   });
 
   const renamed = github.callsTo('rest.issues.updateLabel');
@@ -402,7 +400,7 @@ test('ensure-labels: mis-cased canonical + case-sensitive delete API does not cr
 
   await assert.doesNotReject(
     runGithubScript(ensureLabelsScript(), {
-      github, context: ctx, templateVars: { 'inputs.delete_confusable': true },
+      github, context: ctx, env: { DELETE_CONFUSABLE: 'true' },
     }),
     'the Action must not crash on a case-sensitive delete',
   );
@@ -429,8 +427,7 @@ test('ensure-labels: duplicate backport branches create each label once (no 422 
     runGithubScript(ensureLabelsScript(), {
       github,
       context: ctx,
-      env: { BACKPORT_BRANCHES: 'release/11.1, release/11.1' },
-      templateVars: { 'inputs.delete_confusable': false },
+      env: { BACKPORT_BRANCHES: 'release/11.1, release/11.1', DELETE_CONFUSABLE: 'false' },
     }),
     'duplicate input must not cause a double-create',
   );
@@ -459,8 +456,7 @@ test('ensure-labels: branches whose labels collide case-insensitively create eac
     runGithubScript(ensureLabelsScript(), {
       github,
       context: ctx,
-      env: { BACKPORT_BRANCHES: 'release/11.1 Release/11.1' },
-      templateVars: { 'inputs.delete_confusable': false },
+      env: { BACKPORT_BRANCHES: 'release/11.1 Release/11.1', DELETE_CONFUSABLE: 'false' },
     }),
   );
 
@@ -480,7 +476,7 @@ test('ensure-labels: a case-colliding existing label never triggers createLabel 
 
   await assert.doesNotReject(
     runGithubScript(ensureLabelsScript(), {
-      github, context: ctx, templateVars: { 'inputs.delete_confusable': false },
+      github, context: ctx, env: { DELETE_CONFUSABLE: 'false' },
     }),
     'a case-collision must go through updateLabel, not createLabel',
   );

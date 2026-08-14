@@ -15,6 +15,19 @@ name: Backport
 # ─────────────────────────────────────────────────────────────────────────────
 
 # Triggered by: a merged PR closed/labeled with a `backport <branch>` label, or manual dispatch.
+#
+# SECURITY — read before copying this into a public repo.
+# pull_request_target runs in the BASE branch context, with write permissions and
+# access to secrets, and it fires for PRs from forks. That combination is behind
+# most GitHub Actions secret-exfiltration incidents. Three guards below keep it
+# safe, and all three must stay in place:
+#   1. `prepare` requires `merged == true`, so an unmerged fork PR never runs.
+#   2. `prepare` requires the head branch to live in THIS repo, so even a merged
+#      fork PR is refused rather than trusted.
+#   3. The reusable workflow checks out the base branch, never the PR head. It
+#      does not check out or execute contributor code.
+# Adding `ref: github.event.pull_request.head.*`, or any build/install/test step
+# that executes PR code, turns this into a full repo compromise. Don't.
 on:
   pull_request_target:
     types: [closed, labeled]
@@ -37,11 +50,16 @@ jobs:
     if: >-
       github.event_name == 'pull_request_target' &&
       github.event.pull_request.merged == true &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
       (
         (github.event.action == 'labeled' && startsWith(github.event.label.name, 'backport ')) ||
         (github.event.action == 'closed' && contains(join(github.event.pull_request.labels.*.name, '|'), 'backport '))
       )
     runs-on: ubuntu-latest
+    # Only computes a regex string. Declared so this job never inherits your
+    # repo's default GITHUB_TOKEN permissions, which may be read+write.
+    permissions:
+      contents: read
     outputs:
       label_pattern: ${{ steps.pattern.outputs.label_pattern }}
     steps:

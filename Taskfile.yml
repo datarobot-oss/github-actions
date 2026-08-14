@@ -34,7 +34,9 @@ tasks:
   lint:
     desc: Lint all workflows (actionlint + shellcheck) via Docker — matches CI exactly
     cmds:
-      - docker run --rm -v "$PWD:/repo" --workdir /repo rhysd/actionlint:1.7.12 -color
+      # Digest-pinned to match self-test.yaml exactly (a Docker tag is mutable).
+      # Bump both together; the trailing comment records the human-readable version.
+      - docker run --rm -v "$PWD:/repo" --workdir /repo rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 -color # 1.7.12
 
   clean:
     desc: Remove installed dependencies and local tooling

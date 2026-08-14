@@ -56,7 +56,7 @@ jobs:
 
       - name: Comment with Jira link
         if: steps.extract-ticket.outputs.has-ticket == 'true'
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         env:
           TICKET_IDS: ${{ steps.extract-ticket.outputs.ticket-id }}
           PR_NUMBER: ${{ inputs.pr_number }}

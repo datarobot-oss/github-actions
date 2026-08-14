@@ -1,0 +1,51 @@
+name: Trivy scan
+
+# Dependency CVE and misconfiguration scanning. Not a reusable workflow and not
+# consumed downstream.
+#
+# Scope note: the only third-party dependency here is the dev-only npm test
+# harness, so the vulnerability half of this finds little today. The value is the
+# misconfiguration scanner, which reads the workflows themselves. This repo IS a
+# GitHub Actions supply chain, so a misconfiguration here is inherited by every
+# consuming repo rather than contained.
+#
+# Runs on PRs that touch dependencies or workflows, and weekly so a newly
+# published CVE in an unchanged dependency still surfaces.
+
+on:
+  pull_request:
+    paths:
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/**'
+      - 'examples/**'
+  push:
+    branches: [main]
+  schedule:
+    # Mondays 07:00 UTC, ahead of the Dependabot run the same day.
+    - cron: '0 7 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  trivy:
+    name: Vulnerabilities and misconfiguration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+
+      - name: Scan filesystem
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          scanners: 'vuln,misconfig'
+          # Fail the job only on genuinely actionable severities. LOW/MEDIUM are
+          # reported in the log but do not block a merge, so this does not become
+          # a check people learn to ignore.
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+          ignore-unfixed: true
+          format: 'table'
