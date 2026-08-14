@@ -1,8 +1,23 @@
 # go-task targets for running this repo's self-tests and linters locally.
 # These mirror the .github/workflows/self-test.yaml CI jobs so a green
-# `task` run locally means CI should be green too. Install go-task:
+# `task ci` run locally means CI should be green too. Install go-task:
 #   https://taskfile.dev/installation/
+#
+# New clone? Run `task setup` once: it installs the Node test deps and the git
+# pre-commit hooks.
 version: '3'
+
+vars:
+  # Containers are digest-pinned to match self-test.yaml exactly, because a Docker
+  # tag is mutable and the publisher can repoint it. Bump these and the workflow
+  # together; the trailing comments record the human-readable versions.
+  ACTIONLINT_IMAGE: rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 # 1.7.12
+  GITLEAKS_IMAGE: ghcr.io/gitleaks/gitleaks@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f # v8.30.1
+  # pre-commit is a Python tool and this repo is otherwise Node-only, so it is not
+  # a project dependency. Use whichever is available: a pre-commit already on
+  # PATH, otherwise run it through `uvx` (no persistent install needed).
+  PRECOMMIT:
+    sh: command -v pre-commit >/dev/null 2>&1 && echo pre-commit || echo 'uvx pre-commit'
 
 tasks:
   default:
@@ -11,11 +26,18 @@ tasks:
       - task --list
     silent: true
 
+  setup:
+    desc: One-time setup for a fresh clone (test deps + git pre-commit hooks)
+    cmds:
+      - task: install
+      - task: hooks
+
   ci:
-    desc: Run everything CI runs (lint + tests)
+    desc: Run everything CI runs (lint + tests + secret scan)
     cmds:
       - task: lint
       - task: test
+      - task: secret-scan
 
   install:
     desc: Install Node test dependencies
@@ -25,6 +47,20 @@ tasks:
     status:
       - test -d node_modules
 
+  hooks:
+    desc: Install the git pre-commit hooks (gitleaks + private-key detection)
+    deps: [_require-precommit]
+    cmds:
+      - '{{.PRECOMMIT}} install'
+      - cmd: echo "Hooks installed. Run 'task precommit' to check the whole tree."
+        silent: true
+
+  precommit:
+    desc: Run every pre-commit hook against all files, not just staged ones
+    deps: [_require-precommit]
+    cmds:
+      - '{{.PRECOMMIT}} run --all-files'
+
   test:
     desc: Unit-test the bash / github-script logic embedded in the workflows
     deps: [install]
@@ -32,13 +68,33 @@ tasks:
       - npm test
 
   lint:
-    desc: Lint all workflows (actionlint + shellcheck) via Docker — matches CI exactly
+    desc: Lint all workflows (actionlint + shellcheck) via Docker, matching CI exactly
     cmds:
-      # Digest-pinned to match self-test.yaml exactly (a Docker tag is mutable).
-      # Bump both together; the trailing comment records the human-readable version.
-      - docker run --rm -v "$PWD:/repo" --workdir /repo rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 -color # 1.7.12
+      - docker run --rm -v "$PWD:/repo" --workdir /repo {{.ACTIONLINT_IMAGE}} -color
+
+  secret-scan:
+    desc: Scan the working tree for secrets (gitleaks) via Docker, matching CI exactly
+    cmds:
+      - docker run --rm -v "$PWD:/repo" {{.GITLEAKS_IMAGE}} dir /repo --no-banner --redact --verbose
 
   clean:
-    desc: Remove installed dependencies and local tooling
+    desc: Remove installed dependencies, local tooling, and the git hooks
     cmds:
       - rm -rf node_modules .actionlint-bin
+      # Best-effort: pre-commit may not be installed, and that is not an error here.
+      - cmd: '{{.PRECOMMIT}} uninstall || true'
+        ignore_error: true
+
+  # Fails with an actionable message rather than a bare "command not found" when
+  # neither pre-commit nor uv is available.
+  _require-precommit:
+    internal: true
+    cmds:
+      - cmd: |
+          if ! command -v pre-commit >/dev/null 2>&1 && ! command -v uv >/dev/null 2>&1; then
+            echo "Need either pre-commit or uv on PATH." >&2
+            echo "  uv:         https://docs.astral.sh/uv/getting-started/installation/" >&2
+            echo "  pre-commit: https://pre-commit.com/#install" >&2
+            exit 1
+          fi
+        silent: true
