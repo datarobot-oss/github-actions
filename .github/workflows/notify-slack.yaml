@@ -10,6 +10,9 @@ on:
         type: string
     secrets:
       SLACK_WEBHOOK_URL:
+        description: >-
+          Slack incoming-webhook URL for the channel that receives the digest.
+          If empty the Slack step is skipped rather than failed.
         required: true
 
 jobs:
@@ -188,9 +191,14 @@ jobs:
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           REPO_NAME: ${{ github.repository }}
+          # Via env like everything else in this file. A reusable workflow cannot
+          # assume its inputs are trusted: a consumer is free to wire header_icon
+          # from a PR title or issue body, and `${{ }}` in a run: block expands
+          # before shell quoting, which would put that value in bash source with
+          # SLACK_WEBHOOK_URL in scope.
+          HEADER_ICON: ${{ inputs.header_icon }}
         run: |
           REPO_SHORT="${REPO_NAME##*/}"
-          HEADER_ICON="${{ inputs.header_icon }}"
           # jq builds the entire payload; PR-controlled strings stay in JSON.
           PAYLOAD=$(jq -n \
             --argjson prs "$PR_RECORDS" \

@@ -1,3 +1,5 @@
-# Find the appropriate team in https://github.com/orgs/datarobot-community/teams and grant it write permissions to the repository
-* @datarobot-community/buzok
-**.*.md @datarobot/docs @datarobot-community/buzok
+# Code owners must be a team in THIS repo's org (datarobot-oss) with write access.
+# A team from another org silently resolves to nothing, which leaves branch
+# protection's "require code owner review" enforcing no owner at all.
+# Teams: https://github.com/orgs/datarobot-oss/teams
+* @datarobot-oss/buzok

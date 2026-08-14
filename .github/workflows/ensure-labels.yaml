@@ -46,11 +46,16 @@ jobs:
 
     steps:
       - name: Ensure labels exist (and optionally clean up confusable variants)
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         env:
           # Passed via env (not `${{ }}` string-interpolation into the script)
           # so branch names can never break out of the JS source.
           BACKPORT_BRANCHES: ${{ inputs.backport_branches }}
+          # Same reason. GitHub coerces a `type: boolean` workflow_call input to a
+          # literal true/false, so inlining it was very likely inert, but this job
+          # can DELETE repo labels and the file already states the rule above.
+          # No reason to leave the one exception in place.
+          DELETE_CONFUSABLE: ${{ inputs.delete_confusable }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
@@ -109,7 +114,7 @@ jobs:
             // somehow matched — the backport/release flow owns them.
             const PROTECTED = /^(backport\b|backported\b|backport-failed$|do not merge$|release\/)/i;
 
-            const deleteConfusable = ${{ inputs.delete_confusable }};
+            const deleteConfusable = process.env.DELETE_CONFUSABLE === 'true';
             const { owner, repo } = context.repo;
 
             // 1. Snapshot every existing repo label.

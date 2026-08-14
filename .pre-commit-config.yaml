@@ -1,0 +1,35 @@
+# Local half of secret-leak prevention. Install once:
+#
+#   task hooks      (or `task setup` on a fresh clone, which also installs deps)
+#
+# That runs `pre-commit install` for you, via `uvx` if pre-commit is not already
+# on your PATH. `task precommit` runs every hook against the whole tree.
+#
+# CI tells you a secret is already in history, and once it is in a public repo's
+# history the only real remedy is rotation. These hooks stop it becoming a commit
+# object in the first place, which is the only point where deletion still works.
+#
+# The gitleaks hook mirrors the `Secret scan` job in .github/workflows/self-test.yaml
+# so a local pass and a CI pass mean the same thing.
+
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      # Catches PEM/OpenSSH private keys that gitleaks' entropy rules can miss.
+      - id: detect-private-key
+      # Every workflow and example in this repo is YAML; a parse error here breaks
+      # consumers, not just us.
+      - id: check-yaml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-merge-conflict
+      # This repo ships text only. A binary showing up is almost always an
+      # accident (a downloaded .pem, a coverage artifact, an OS thumbnail).
+      - id: check-added-large-files
+        args: ['--maxkb=256']

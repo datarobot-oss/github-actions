@@ -4,28 +4,38 @@ on:
   workflow_call:
     inputs:
       pr_number:
+        description: 'PR number, shown in the Slack message. Usually `github.event.pull_request.number`.'
         required: true
         type: number
       pr_url:
+        description: 'PR web URL, linked from the Slack message. Usually `github.event.pull_request.html_url`.'
         required: true
         type: string
       pr_title:
+        description: 'PR title, shown in the Slack message. Usually `github.event.pull_request.title`.'
         required: true
         type: string
       pr_author:
+        description: 'PR author login, shown in the Slack message. Usually `github.event.pull_request.user.login`.'
         required: true
         type: string
       pr_additions:
+        description: 'Lines added, shown as `+N`. Usually `github.event.pull_request.additions`.'
         required: true
         type: number
       pr_deletions:
+        description: 'Lines removed, shown as `-N`. Usually `github.event.pull_request.deletions`.'
         required: true
         type: number
       repo_name:
+        description: 'Full `owner/repo` name, shown in the Slack message. Usually `github.repository`.'
         required: true
         type: string
     secrets:
       SLACK_WEBHOOK_URL:
+        description: >-
+          Slack incoming-webhook URL for the channel that receives the
+          notification. If empty the Slack step is skipped rather than failed.
         required: true
 
 jobs:
@@ -35,30 +45,6 @@ jobs:
       pull-requests: write
 
     steps:
-      # Disabled: auto-label PRs by which team is a requested reviewer. Kept here
-      # for reference — re-enable by uncommenting and giving the step a real
-      # condition (a constant `if: false` is flagged by actionlint, so it was
-      # commented out rather than left gated off).
-      #
-      # - name: Add team-specific labels based on reviewers
-      #   env:
-      #     GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      #     PR_NR: ${{ inputs.pr_number }}
-      #   run: |
-      #     # Check if Buzok team is a code reviewer and add label if needed
-      #     PR_REVIEWERS=$(gh pr view "$PR_NR" --json reviewRequests --jq '.reviewRequests[].name, .reviewRequests[].slug')
-      #     echo "PR Reviewers: $PR_REVIEWERS"
-      #
-      #     if echo "$PR_REVIEWERS" | grep -E "(datarobot-community/buzok|Buzok)" >/dev/null; then
-      #       echo "Buzok team is a reviewer, adding label..."
-      #       gh pr edit "$PR_NR" --add-label "Needs Review: GenAI Tooling (Buzok)"
-      #     fi
-      #
-      #     if echo "$PR_REVIEWERS" | grep -E "(datarobot-community/docs|Docs)" >/dev/null; then
-      #       echo "Docs team is a reviewer, adding label..."
-      #       gh pr edit "$PR_NR" --add-label "Needs Review: Docs"
-      #     fi
-
       - name: Send notification to Slack
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

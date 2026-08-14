@@ -8,8 +8,19 @@ name: Backport
 
 on:
   # pull_request_target runs in the base-branch context with write access and
-  # secrets, and fires for labels added AFTER merge — both needed here. Safe for
-  # internal repos where PRs come from branches, not untrusted forks.
+  # secrets, and fires for labels added AFTER merge. Both are needed here.
+  #
+  # SECURITY: pull_request_target is the trigger behind most Actions
+  # secret-exfiltration incidents, and this repo is PUBLIC, so fork PRs can
+  # reach it. Three things keep it safe, and all three must hold:
+  #   1. `prepare` requires `merged == true`, so an unmerged fork PR never runs.
+  #   2. `prepare` additionally requires the head to be a branch in THIS repo
+  #      (see the `head.repo.full_name` check below), so a merged fork PR is
+  #      still refused rather than trusted.
+  #   3. The callee (backport.yaml) checks out with no `ref:`, resolving to the
+  #      base branch. It never checks out or executes PR head code.
+  # If you ever add `ref: github.event.pull_request.head.*` or any build/install
+  # step to the callee, this becomes a full compromise path. Don't.
   pull_request_target:
     types: [closed, labeled]
   # Manual backport of a merged PR onto arbitrary branch(es), no labels needed.
@@ -38,11 +49,16 @@ jobs:
     if: >-
       github.event_name == 'pull_request_target' &&
       github.event.pull_request.merged == true &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
       (
         (github.event.action == 'labeled' && startsWith(github.event.label.name, 'backport ')) ||
         (github.event.action == 'closed' && contains(join(github.event.pull_request.labels.*.name, '|'), 'backport '))
       )
     runs-on: ubuntu-latest
+    # Only computes a regex string. Declared explicitly so the job never inherits
+    # the consuming repo's default token permissions, which may be read+write.
+    permissions:
+      contents: read
     outputs:
       label_pattern: ${{ steps.pattern.outputs.label_pattern }}
     steps:
