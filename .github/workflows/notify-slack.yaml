@@ -10,6 +10,9 @@ on:
         type: string
     secrets:
       SLACK_WEBHOOK_URL:
+        description: >-
+          Slack incoming-webhook URL for the channel that receives the digest.
+          If empty the Slack step is skipped rather than failed.
         required: true
 
 jobs:

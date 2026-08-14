@@ -35,3 +35,38 @@ jobs:
           node-version: '22'
       - run: npm ci
       - run: npm test
+
+  # Every PR must record what changed, because consumers pin this repo by tag and
+  # the release notes are the only thing telling them whether a bump is safe.
+  # Apply the `skip-changelog` label for changes with no consumer-visible effect.
+  changelog:
+    name: Changelog updated
+    if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'skip-changelog')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # Full history so the merge-base with the target branch is available.
+          fetch-depth: 0
+      - name: Require a CHANGELOG.md entry
+        env:
+          # Via env, not ${{ }} in the script body: a branch name is
+          # attacker-controlled on a fork PR and would otherwise be expanded
+          # into bash source.
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if git diff --name-only "origin/${BASE_REF}...HEAD" | grep -qx 'CHANGELOG.md'; then
+            echo "CHANGELOG.md was updated."
+            exit 0
+          fi
+          cat >&2 <<'EOF'
+          CHANGELOG.md was not updated.
+
+          Add an entry under "## [Unreleased]" describing what changed and why a
+          consumer would care. Group it under Added / Changed / Fixed / Removed /
+          Security.
+
+          If this change has no consumer-visible effect (CI-only tweak, typo in a
+          comment), apply the `skip-changelog` label to the PR instead.
+          EOF
+          exit 1

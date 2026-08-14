@@ -4,28 +4,38 @@ on:
   workflow_call:
     inputs:
       pr_number:
+        description: 'PR number, shown in the Slack message. Usually `github.event.pull_request.number`.'
         required: true
         type: number
       pr_url:
+        description: 'PR web URL, linked from the Slack message. Usually `github.event.pull_request.html_url`.'
         required: true
         type: string
       pr_title:
+        description: 'PR title, shown in the Slack message. Usually `github.event.pull_request.title`.'
         required: true
         type: string
       pr_author:
+        description: 'PR author login, shown in the Slack message. Usually `github.event.pull_request.user.login`.'
         required: true
         type: string
       pr_additions:
+        description: 'Lines added, shown as `+N`. Usually `github.event.pull_request.additions`.'
         required: true
         type: number
       pr_deletions:
+        description: 'Lines removed, shown as `-N`. Usually `github.event.pull_request.deletions`.'
         required: true
         type: number
       repo_name:
+        description: 'Full `owner/repo` name, shown in the Slack message. Usually `github.repository`.'
         required: true
         type: string
     secrets:
       SLACK_WEBHOOK_URL:
+        description: >-
+          Slack incoming-webhook URL for the channel that receives the
+          notification. If empty the Slack step is skipped rather than failed.
         required: true
 
 jobs:

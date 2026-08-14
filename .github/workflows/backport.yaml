@@ -203,7 +203,7 @@ jobs:
                   '',
                   'When the checks pass, remove the **`do not merge`** label and merge.',
                   '',
-                  '_To make CI run automatically on future backports, configure the backport GitHub App — see `BACKPORT.md`._',
+                  '_To make CI run automatically on future backports, configure the backport GitHub App: see [BACKPORT.md](https://github.com/datarobot-oss/github-actions/blob/main/docs/BACKPORT.md)._',
                 ].join('\n');
                 await github.rest.issues.createComment({ owner, repo, issue_number: n, body });
               }

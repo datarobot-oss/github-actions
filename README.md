@@ -1,14 +1,16 @@
 <p align="center">
   <a href="https://github.com/datarobot-oss/github-actions">
-    <img src=".github/img/datarobot_logo.avif" width="600px" alt="DataRobot Logo"/>
+    <img src="https://af.datarobot.com/img/datarobot_logo.avif" width="600px" alt="DataRobot Logo"/>
   </a>
 </p>
-<h3 align="center">DataRobot Github Actions</h3>
+<p align="center">
+    <span style="font-size: 1.5em; font-weight: bold; display: block;">DataRobot GitHub Actions</span>
+</p>
 
 <p align="center">
   <a href="https://datarobot.com">Homepage</a>
   ·
-  <a href="https://docs.datarobot.com/en/docs/">DataRobot Documentation</a>
+  <a href="https://docs.datarobot.com/en/docs/">Documentation</a>
   ·
   <a href="https://docs.datarobot.com/en/docs/get-started/troubleshooting/general-help.html">Support</a>
 </p>
@@ -23,31 +25,84 @@
   <a href="/LICENSE">
     <img src="https://img.shields.io/github/license/datarobot-oss/github-actions" alt="License">
   </a>
+  <img src="https://img.shields.io/badge/status-beta-orange" alt="Beta">
 </p>
 
-A collection of github actions tools for use in open source projects.
+> [!NOTE]
+> This project is in **beta** (`0.0.x`). Workflow inputs, secrets, and label names may change
+> between releases. Pin to a tag and read the release notes before bumping.
 
-# Using this Repo
-Copy example workflows from the `examples` directory to your `.github/workflows` folder in your repo. You can bump the `@VERSION` field to upgrade
-to new revisions. The examples should be drop in and go. You make need to add the appropriate `SECRET` keys to your repo such as:
-- `SLACK_WEBHOOK_URL` (receive slack notifications in the specified channel)
+Reusable GitHub Actions workflows for pull-request automation, backporting, and releases.
 
-If you use the PR-automation workflow, also copy `examples/workflow-ensure-labels.yaml` and run it once from the Actions tab. It creates the labels
-the automation depends on (`00 - Ready for Review`, `00 - Reviewed`); after that the helper jobs assume those labels exist. It has an optional
-destructive mode that cleans up confusable label variants (e.g. `Ready for Review` without the `00 - ` prefix), migrating any open PRs to the
-canonical label first.
+**What it does:** ships four drop-in workflows you copy into your own repo, each of which calls a
+versioned reusable workflow hosted here. They cover the mechanics most repos rebuild by hand: pinging
+Slack when a PR is ready for review, labelling approved PRs, linking Jira tickets, cherry-picking a
+merged PR onto release branches, and cutting a tagged release on merge. Nothing here is
+DataRobot-specific to run, and no DataRobot service is required.
 
+# Table of contents
 
-# Contributing & testing
+- [Quick start](#quick-start)
+- [Available workflows](#available-workflows)
+- [Secrets](#secrets)
+- [Documentation](#documentation)
+- [Contributing, support, and legal](#contributing-support-and-legal)
 
-The reusable workflows are linted and unit-tested so changes can be validated on
-the PR before a release tag is cut. Run `task ci` (lint + tests) before opening
-a PR. See [TESTING.md](TESTING.md) for details and how to add tests for a new
-workflow.
+# Quick start
 
-# Get help
+Copy the workflow you want from [`examples/`](examples) into your repo's `.github/workflows/`
+directory. Each example is a thin trigger wrapper that pins a released version of the reusable
+workflow, so it works unmodified:
 
-If you encounter issues or have questions, try the following:
+```bash
+curl -o .github/workflows/pr-automation.yaml \
+  https://raw.githubusercontent.com/datarobot-oss/github-actions/0.0.18/examples/workflow-pr-automation.yaml
+```
 
-- [Contact DataRobot](https://docs.datarobot.com/en/docs/get-started/troubleshooting/general-help.html) for support.
-- Open an issue on the [GitHub repository](https://github.com/datarobot-oss/github-actions).
+Then run [`workflow-ensure-labels.yaml`](examples/workflow-ensure-labels.yaml) once from the Actions
+tab. It creates the labels the other workflows depend on, and it is idempotent, so re-running it is
+safe. Add any [secrets](#secrets) the workflow you chose needs.
+
+To upgrade later, bump the `@0.0.18` ref in the `uses:` lines to a newer
+[tag](https://github.com/datarobot-oss/github-actions/tags).
+
+# Available workflows
+
+| Workflow | What it does | Trigger | Secrets |
+|---|---|---|---|
+| [`workflow-pr-automation.yaml`](examples/workflow-pr-automation.yaml) | Labels approved PRs as reviewed, pings Slack when a PR is marked ready for review, comments Jira links, and posts a 30-minute digest of open PRs | approving review; PR labeled, opened, or edited; 30-minute cron; manual | `SLACK_WEBHOOK_URL` |
+| [`workflow-backport.yaml`](examples/workflow-backport.yaml) | Cherry-picks a merged PR onto one or more release branches, opening a PR per branch | `backport <branch>` label on a merged PR, or manual dispatch | `BACKPORT_APP_ID`, `BACKPORT_APP_PRIVATE_KEY` (both optional) |
+| [`workflow-ensure-labels.yaml`](examples/workflow-ensure-labels.yaml) | Creates the labels the other workflows require. Idempotent; run once at setup | manual dispatch | none |
+| [`workflow-create-release-on-merge.yaml`](examples/workflow-create-release-on-merge.yaml) | Tags the next patch version and cuts a GitHub release | push to `main` | none |
+
+The PR-automation and backport workflows depend on labels that
+[`workflow-ensure-labels.yaml`](examples/workflow-ensure-labels.yaml) creates. A missing label
+hard-fails the job on purpose, so a setup problem shows up as a red X rather than silently doing
+nothing.
+
+# Secrets
+
+| Secret | Needed by | Notes |
+|---|---|---|
+| `SLACK_WEBHOOK_URL` | `workflow-pr-automation.yaml` | Incoming-webhook URL for the channel that receives PR notifications. Without it the Slack steps skip rather than fail. |
+| `BACKPORT_APP_ID` | `workflow-backport.yaml` | Optional. GitHub App ID. |
+| `BACKPORT_APP_PRIVATE_KEY` | `workflow-backport.yaml` | Optional. The App's private key. Together with `BACKPORT_APP_ID` this makes CI run automatically on backport PRs; without them the workflow falls back to `GITHUB_TOKEN` and CI must be kicked by hand. See [docs/BACKPORT.md](docs/BACKPORT.md). |
+
+# Documentation
+
+- [docs/BACKPORT.md](docs/BACKPORT.md) covers the backport flow in depth: label conventions, the
+  manual dispatch path, conflict handling, and the one-time GitHub App setup.
+- [docs/TESTING.md](docs/TESTING.md) covers how the workflows are tested and how to add tests for a
+  new one.
+
+# Contributing, support, and legal
+
+See [AUTHORS](AUTHORS) and [LICENSE](LICENSE) for authorship and licensing information.
+
+To contribute, fork the repository, make your changes on a branch, and open a pull request. Run
+`task ci` (lint plus unit tests) before submitting. See
+[CONTRIBUTING.md](.github/CONTRIBUTING.md) for additional guidelines and
+[docs/TESTING.md](docs/TESTING.md) for how the test harness works.
+
+For support, [contact DataRobot](https://docs.datarobot.com/en/docs/get-started/troubleshooting/general-help.html)
+or open an issue on the [GitHub repository](https://github.com/datarobot-oss/github-actions/issues).

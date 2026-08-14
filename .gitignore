@@ -7,3 +7,8 @@ npm-debug.log*
 
 # OS / editor cruft
 .DS_Store
+
+# Local agent/editor settings — never commit to a public repo
+.claude/
+.vscode/
+.idea/

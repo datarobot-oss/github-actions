@@ -4,12 +4,22 @@ on:
   workflow_call:
     inputs:
       pr_title:
+        description: >-
+          PR title, searched for ticket IDs of the form `[ABC-1234]`. Usually
+          `github.event.pull_request.title`.
         required: true
         type: string
       pr_number:
+        description: >-
+          Number of the PR to comment on. Usually
+          `github.event.pull_request.number`.
         required: true
         type: number
       pr_branch:
+        description: >-
+          Head branch name, used as a fallback source for the ticket ID when the
+          title has none (e.g. `user/ABC-1234-something`). Usually
+          `github.event.pull_request.head.ref`.
         required: true
         type: string
 
