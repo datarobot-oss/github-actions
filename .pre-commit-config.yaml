@@ -1,7 +1,9 @@
 # Local half of secret-leak prevention. Install once:
 #
-#   uv tool install pre-commit   (or: pipx install pre-commit)
-#   pre-commit install
+#   task hooks      (or `task setup` on a fresh clone, which also installs deps)
+#
+# That runs `pre-commit install` for you, via `uvx` if pre-commit is not already
+# on your PATH. `task precommit` runs every hook against the whole tree.
 #
 # CI tells you a secret is already in history, and once it is in a public repo's
 # history the only real remedy is rotation. These hooks stop it becoming a commit

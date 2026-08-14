@@ -14,10 +14,14 @@ vars:
   ACTIONLINT_IMAGE: rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 # 1.7.12
   GITLEAKS_IMAGE: ghcr.io/gitleaks/gitleaks@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f # v8.30.1
   # pre-commit is a Python tool and this repo is otherwise Node-only, so it is not
-  # a project dependency. Use whichever is available: a pre-commit already on
-  # PATH, otherwise run it through `uvx` (no persistent install needed).
+  # a project dependency. Use whichever is available: a working pre-commit already
+  # on PATH, otherwise run it through `uvx` (no persistent install needed).
+  #
+  # Probe with `--version` rather than `command -v`: a pyenv/asdf shim can sit on
+  # PATH and still exit 127 because the package is not installed for the active
+  # interpreter. Testing that it actually runs is what makes the fallback reliable.
   PRECOMMIT:
-    sh: command -v pre-commit >/dev/null 2>&1 && echo pre-commit || echo 'uvx pre-commit'
+    sh: pre-commit --version >/dev/null 2>&1 && echo pre-commit || echo 'uvx pre-commit'
 
 tasks:
   default:
@@ -91,8 +95,8 @@ tasks:
     internal: true
     cmds:
       - cmd: |
-          if ! command -v pre-commit >/dev/null 2>&1 && ! command -v uv >/dev/null 2>&1; then
-            echo "Need either pre-commit or uv on PATH." >&2
+          if ! pre-commit --version >/dev/null 2>&1 && ! command -v uv >/dev/null 2>&1; then
+            echo "Need either a working pre-commit or uv on PATH." >&2
             echo "  uv:         https://docs.astral.sh/uv/getting-started/installation/" >&2
             echo "  pre-commit: https://pre-commit.com/#install" >&2
             exit 1

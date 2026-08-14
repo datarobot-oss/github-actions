@@ -110,7 +110,8 @@ nothing.
 See [AUTHORS](AUTHORS) and [LICENSE](LICENSE) for authorship and licensing information.
 
 To contribute, fork the repository, make your changes on a branch, and open a pull request. Run
-`task ci` (lint plus unit tests) before submitting. See
+`task setup` once on a fresh clone to install the test dependencies and the git pre-commit hooks, then
+`task ci` (lint, unit tests, secret scan) before submitting. See
 [CONTRIBUTING.md](.github/CONTRIBUTING.md) for additional guidelines and
 [docs/TESTING.md](docs/TESTING.md) for how the test harness works.
 

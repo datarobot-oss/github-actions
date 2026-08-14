@@ -23,6 +23,12 @@ than exhaustive.
   scanning and push protection.
 - `.pre-commit-config.yaml` with gitleaks and `detect-private-key`, mirroring the CI job so a local
   pass and a CI pass mean the same thing.
+- `task` targets for the hooks: `task setup` (fresh clone: dependencies plus hooks), `task hooks`
+  (install the git hooks), and `task precommit` (run every hook against the whole tree). pre-commit is
+  a Python tool and this repo is otherwise Node-only, so it runs through `uvx` when it is not already
+  on your PATH rather than becoming a project dependency.
+- `task secret-scan`, running the same digest-pinned gitleaks container as CI. `task ci` now covers
+  lint, tests, and the secret scan, so it still mirrors what CI runs.
 - `.github/workflows/trivy-scan.yaml` for dependency CVEs and workflow misconfiguration, on relevant
   PRs and weekly.
 
@@ -59,6 +65,7 @@ than exhaustive.
 - Documentation links that broke when `TESTING.md` and `BACKPORT.md` moved into `docs/`. The link
   posted into consumers' backport PRs is now an absolute URL, since a relative path cannot resolve
   in another repository.
+- Missing trailing newline in `.github/PULL_REQUEST_TEMPLATE.md` (caught by the new hooks).
 
 ## [0.0.18] - 2026-07-06
 
