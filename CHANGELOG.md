@@ -15,6 +15,8 @@ than exhaustive.
 
 ## Unreleased
 
+
+## 0.0.20 - 2026-08-14
 - `add-jira-link` takes a `jira_base_url` input. The DataRobot Jira host used to be hardcoded in the
   middle of the comment-building script, so every consumer posted links only DataRobot staff could
   open while the generic `[ABC-1234]` ticket regex made the workflow look portable. The input still
