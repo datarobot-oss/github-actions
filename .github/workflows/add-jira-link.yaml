@@ -22,6 +22,16 @@ on:
           `github.event.pull_request.head.ref`.
         required: true
         type: string
+      jira_base_url:
+        description: >-
+          Base URL that ticket IDs are appended to, e.g.
+          `https://your-org.atlassian.net/browse`. Defaults to DataRobot's
+          tenant, so set this to your own if you are not a DataRobot repo,
+          otherwise the comment links somewhere your readers cannot open. Set
+          it to an empty string to skip the Jira comment entirely.
+        required: false
+        default: 'https://datarobot.atlassian.net/browse'
+        type: string
 
 jobs:
   add-jira-link:
@@ -54,17 +64,23 @@ jobs:
             echo "No Jira ticket found in PR title or branch name"
           fi
 
+      # An empty jira_base_url means the caller has no Jira (or does not want the
+      # comment): skip rather than post a link nobody can follow.
       - name: Comment with Jira link
-        if: steps.extract-ticket.outputs.has-ticket == 'true'
+        if: steps.extract-ticket.outputs.has-ticket == 'true' && inputs.jira_base_url != ''
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         env:
           TICKET_IDS: ${{ steps.extract-ticket.outputs.ticket-id }}
           PR_NUMBER: ${{ inputs.pr_number }}
+          JIRA_BASE_URL: ${{ inputs.jira_base_url }}
         with:
           script: |
             const ticketIds = process.env.TICKET_IDS.split(',').filter(Boolean);
             const issueNumber = Number(process.env.PR_NUMBER);
-            const links = ticketIds.map(id => `[${id}](https://datarobot.atlassian.net/browse/${id})`);
+            // Tolerate a trailing slash so both `.../browse` and `.../browse/`
+            // produce one separator instead of an accidental `//`.
+            const jiraBaseUrl = process.env.JIRA_BASE_URL.replace(/\/+$/, '');
+            const links = ticketIds.map(id => `[${id}](${jiraBaseUrl}/${id})`);
             const header = ticketIds.length === 1 ? '### 🎫 Jira Ticket' : '### 🎫 Jira Tickets';
             const body = ticketIds.length === 1 ? links[0] : links.map(l => `- ${l}`).join('\n');
             const commentBody = `${header}\n\n${body}`;

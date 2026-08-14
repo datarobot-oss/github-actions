@@ -157,6 +157,49 @@ test('mark-pr-to-review: an empty webhook URL is skipped, not crashed on', () =>
   assert.match(r.stderr, /empty; skipping/);
 });
 
+// slack_mention is what keeps one team's Slack handle out of every other
+// consumer's channel, so both the set and unset shapes are pinned here.
+test('mark-pr-to-review: slack_mention prefixes the message when set', () => {
+  const script = runScript(loadWorkflow('mark-pr-to-review'), { name: 'Send notification to Slack' });
+  const r = runBash(script, {
+    env: {
+      SLACK_WEBHOOK_URL: 'https://hooks.slack.test/abc',
+      SLACK_MENTION: '@some-team',
+      PR_NR: '123',
+      PR_URL: 'https://github.com/org/repo/pull/123',
+      PR_TITLE: 'A normal title',
+      PR_AUTHOR: 'alice',
+      PR_ADDITIONS: '10',
+      PR_DELETIONS: '3',
+      REPO_NAME: 'org/repo',
+    },
+  });
+  assert.equal(r.code, 0, r.stderr);
+  const text = JSON.parse(r.posts[0].data).blocks[0].text.text;
+  assert.ok(text.startsWith('@some-team: :rocket:'), `mention should lead the message, got: ${text}`);
+});
+
+test('mark-pr-to-review: an unset slack_mention leaves no stray separator', () => {
+  const script = runScript(loadWorkflow('mark-pr-to-review'), { name: 'Send notification to Slack' });
+  const r = runBash(script, {
+    env: {
+      SLACK_WEBHOOK_URL: 'https://hooks.slack.test/abc',
+      SLACK_MENTION: '',
+      PR_NR: '123',
+      PR_URL: 'https://github.com/org/repo/pull/123',
+      PR_TITLE: 'A normal title',
+      PR_AUTHOR: 'alice',
+      PR_ADDITIONS: '10',
+      PR_DELETIONS: '3',
+      REPO_NAME: 'org/repo',
+    },
+  });
+  assert.equal(r.code, 0, r.stderr);
+  const text = JSON.parse(r.posts[0].data).blocks[0].text.text;
+  assert.ok(text.startsWith(':rocket:'), `no mention means no prefix, got: ${text}`);
+  assert.doesNotMatch(text, /buzok/i, 'no internal team handle is baked into the reusable workflow');
+});
+
 // --------------------------------------------------------------------------
 // notify-slack.yaml — scheduled digest of open "ready for review" PRs
 // --------------------------------------------------------------------------
@@ -224,7 +267,7 @@ test('notify-slack: build-pr-list skips approved PRs and computes waiting time',
   assert.equal(records.length, 1, 'only the unapproved PR survives');
   assert.equal(records[0].number, 1);
   assert.equal(records[0].title, 'Add "feature" & stuff', 'title round-trips through JSON intact');
-  assert.equal(records[0].status_icon, ':green_with_check:');
+  assert.equal(records[0].status_icon, ':white_check_mark:', 'falls back to the universal default icon');
   assert.match(records[0].waiting, /waiting 1d 0h/);
 });
 
@@ -317,7 +360,38 @@ test('notify-slack: approved PR with a pending re-review request is re-surfaced'
   assert.equal(r.code, 0, r.stderr);
   const records = JSON.parse(r.exportedEnv.PR_RECORDS);
   assert.equal(records.length, 1, 'approval is overridden by the pending re-review request');
-  assert.equal(records[0].status_icon, ':yellow_pending:');
+  assert.equal(records[0].status_icon, ':hourglass_flowing_sand:');
+});
+
+test('notify-slack: caller-supplied status icons override the universal defaults', () => {
+  const script = runScript(loadWorkflow('notify-slack'), { id: 'build-pr-list' });
+  const fixtures = [
+    { match: 'pulls/1/reviews', body: [] },
+    {
+      match: 'pulls/1',
+      body: {
+        number: 1, title: 'A', user: { login: 'alice' }, additions: 1, deletions: 1,
+        html_url: 'https://github.com/org/repo/pull/1', head: { sha: 'sha1' }, requested_reviewers: [],
+      },
+    },
+    { match: 'issues/1/events', body: [] },
+    { match: 'commits/sha1/status', body: { state: 'success' } },
+  ];
+  const r = runBash(script, {
+    env: {
+      GH_TOKEN: 'x',
+      REPO_NAME: 'org/repo',
+      PR_NUMBERS: '1',
+      STATUS_ICON_SUCCESS: ':green_with_check:',
+      STATUS_ICON_FAILURE: ':red_with_cross:',
+      STATUS_ICON_PENDING: ':yellow_pending:',
+    },
+    now: sec('2026-06-30T00:00:00Z'),
+    curlFixtures: fixtures,
+  });
+  assert.equal(r.code, 0, r.stderr);
+  const records = JSON.parse(r.exportedEnv.PR_RECORDS);
+  assert.equal(records[0].status_icon, ':green_with_check:');
 });
 
 // --------------------------------------------------------------------------

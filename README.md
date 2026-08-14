@@ -44,6 +44,7 @@ DataRobot-specific to run, and no DataRobot service is required.
 
 - [Quick start](#quick-start)
 - [Available workflows](#available-workflows)
+- [Configuration](#configuration)
 - [Secrets](#secrets)
 - [Documentation](#documentation)
 - [Contributing, support, and legal](#contributing-support-and-legal)
@@ -89,6 +90,19 @@ The PR-automation and backport workflows depend on labels that
 [`workflow-ensure-labels.yaml`](examples/workflow-ensure-labels.yaml) creates. A missing label
 hard-fails the job on purpose, so a setup problem shows up as a red X rather than silently doing
 nothing.
+
+# Configuration
+
+Every workflow runs unmodified, but a few inputs decide whether the output makes sense outside
+DataRobot. Each one is set in your copy of the example, not in the reusable workflow, so upgrading
+never overwrites your choice.
+
+| Input | Workflow | Default | Set it when |
+|---|---|---|---|
+| `jira_base_url` | `add-jira-link.yaml` | DataRobot's Jira tenant | You have your own Jira. Otherwise the PR comment links to a tenant your readers cannot open. Set it to `''` to drop the Jira comment entirely. |
+| `slack_mention` | `mark-pr-to-review.yaml` | empty (no mention) | You want reviewers pinged rather than relying on them watching the channel. Use a user group that exists in your workspace; Slack renders an unresolvable handle as plain text. |
+| `status_icon_success` / `_failure` / `_pending` | `notify-slack.yaml` | `:white_check_mark:` / `:x:` / `:hourglass_flowing_sand:` | You want the digest's CI-status column to use custom emoji. Defaults are Slack built-ins, which exist in every workspace; a custom emoji name that is not installed renders as literal `:name:` text. |
+| `header_icon` | `notify-slack.yaml` | `clipboard` | You want a different emoji at the head of the digest. |
 
 # Secrets
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// `gh` CLI stub. The only step using gh (mark-pr-to-review's labelling step) is
-// gated behind `if: false`, so this should never be reached in practice — it
-// exists so an accidental call fails loudly instead of hitting the network.
+// `gh` CLI stub. No shipped workflow shells out to `gh`, so this should never be
+// reached. It exists so that if one ever starts, the test fails loudly here
+// rather than quietly reaching the network from a test run.
 process.stderr.write(`gh stub: unexpected call: gh ${process.argv.slice(2).join(' ')}\n`);
 process.exit(1);
