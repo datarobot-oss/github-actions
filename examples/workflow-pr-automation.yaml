@@ -10,6 +10,13 @@ name: PR Automation
 # - `00 - Reviewed`         — applied on approval; excludes the PR from the digest.
 # Missing labels hard-fail the job (a red X = a real setup problem, not hidden).
 # ─────────────────────────────────────────────────────────────────────────────
+# COMMENTED-OUT INPUTS
+# A few `with:` entries below are commented out. They are knobs added after the
+# `@0.0.18` release pinned here, and passing an input the pinned version does not
+# declare fails the run. To use one, bump the `@0.0.18` refs to a release that
+# declares it (see CHANGELOG.md), then uncomment. Each is shown at its default,
+# so uncommenting without editing the value changes nothing.
+# ─────────────────────────────────────────────────────────────────────────────
 
 # Triggered by: an approving review, PR label/open/edit events, a 30-min cron, or manual dispatch.
 on:
@@ -41,7 +48,7 @@ jobs:
       # YOUR workspace, e.g. '@platform-team' or '<!subteam^S0123ABCD>'. Slack
       # renders a handle it cannot resolve as plain text, so a group name copied
       # from another workspace pings nobody. Left empty, no mention is added.
-      slack_mention: ''
+      # slack_mention: ''
       pr_number: ${{ github.event.pull_request.number }}
       pr_url: ${{ github.event.pull_request.html_url }}
       pr_title: ${{ github.event.pull_request.title }}
@@ -61,7 +68,7 @@ jobs:
     with:
       # Your Jira tenant. Change the host to your own, or set it to '' to turn
       # the Jira comment off. Left as-is, the comment links to DataRobot's Jira.
-      jira_base_url: 'https://datarobot.atlassian.net/browse'
+      # jira_base_url: 'https://datarobot.atlassian.net/browse'
       pr_title: ${{ github.event.pull_request.title }}
       pr_number: ${{ github.event.pull_request.number }}
       pr_branch: ${{ github.head_ref }}
@@ -79,9 +86,9 @@ jobs:
       # render in every workspace. Swap in custom emoji your own workspace has
       # installed if you prefer; a custom name that is not installed shows up as
       # literal ':name:' text.
-      status_icon_success: ':white_check_mark:'
-      status_icon_failure: ':x:'
-      status_icon_pending: ':hourglass_flowing_sand:'
+      # status_icon_success: ':white_check_mark:'
+      # status_icon_failure: ':x:'
+      # status_icon_pending: ':hourglass_flowing_sand:'
       header_icon: 'clipboard'
     secrets:
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

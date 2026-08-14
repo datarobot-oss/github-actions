@@ -28,6 +28,11 @@ than exhaustive.
   The digest's CI-status column used three emoji that only exist in DataRobot's Slack workspace, so in
   any other workspace every status line rendered as literal `:yellow_pending:` text. The defaults are
   now Slack built-ins that exist everywhere, and this repo's caller opts back into the custom set.
+- The three inputs above ship commented out in `examples/workflow-pr-automation.yaml`, because the
+  examples pin `@0.0.18` and that release does not declare them. Passing a reusable workflow an input
+  its pinned version does not declare fails the run, so a copy-pasted example would have red-X'd on
+  every PR open, edit, and cron tick. Each is shown at its default, so bumping the `uses:` refs to a
+  release that declares them and uncommenting changes no behavior on its own.
 - Renamed two reusable workflows that shared the display name
   `Notify GenAI team on "Ready for review" PRs`, which is the string rendered in every consuming
   repo's Actions tab. They are now `Notify Slack: PR ready for review` and
