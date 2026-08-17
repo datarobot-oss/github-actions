@@ -15,6 +15,8 @@ than exhaustive.
 
 ## Unreleased
 
+
+## 0.0.21 - 2026-08-17
 - Examples now pin `@0.0.20` instead of `@0.0.18`, and the README quick start matches. `0.0.20` is the
   first release that declares `slack_mention`, `jira_base_url`, and the `status_icon_*` set, so those
   inputs are no longer commented out in `examples/workflow-pr-automation.yaml`. Every input each
