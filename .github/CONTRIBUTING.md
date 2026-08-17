@@ -4,8 +4,10 @@ Guidelines for developing and contributing to this project.
 
 ## List of project maintainers
 
-- [DataRobot](https://www.datarobot.com)
+- [@datarobot-oss/buzok](https://github.com/orgs/datarobot-oss/teams/buzok) — the
+  maintaining team, and the code owners for this repo. Review requests go here.
 - [Matt Nitzken](https://github.com/mjnitz02)
+- [DataRobot](https://www.datarobot.com)
 
 
 ## Opening new issues

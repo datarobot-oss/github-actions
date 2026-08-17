@@ -24,7 +24,7 @@ test('add-jira-link: single ticket creates a singular comment', async () => {
   await runGithubScript(script, {
     github,
     context: ctx,
-    env: { TICKET_IDS: 'BUZZOK-123', PR_NUMBER: '42', JIRA_BASE_URL },
+    env: { TICKET_IDS: 'PROJ-123', PR_NUMBER: '42', JIRA_BASE_URL },
   });
 
   const created = github.callsTo('rest.issues.createComment');
@@ -33,7 +33,7 @@ test('add-jira-link: single ticket creates a singular comment', async () => {
   const { body, issue_number } = created[0].params;
   assert.equal(issue_number, 42);
   assert.match(body, /### 🎫 Jira Ticket\n/); // singular header
-  assert.match(body, /\[BUZZOK-123\]\(https:\/\/datarobot\.atlassian\.net\/browse\/BUZZOK-123\)/);
+  assert.match(body, /\[PROJ-123\]\(https:\/\/datarobot\.atlassian\.net\/browse\/PROJ-123\)/);
   assert.doesNotMatch(body, /^- /m, 'single ticket should not be a bullet list');
 });
 
@@ -76,13 +76,13 @@ test('add-jira-link: multiple tickets render a bulleted, pluralized list', async
   await runGithubScript(script, {
     github,
     context: ctx,
-    env: { TICKET_IDS: 'BUZZOK-1,BUZZOK-2', PR_NUMBER: '7', JIRA_BASE_URL },
+    env: { TICKET_IDS: 'PROJ-1,PROJ-2', PR_NUMBER: '7', JIRA_BASE_URL },
   });
 
   const { body } = github.callsTo('rest.issues.createComment')[0].params;
   assert.match(body, /### 🎫 Jira Tickets\n/); // plural header
-  assert.match(body, /- \[BUZZOK-1\]/);
-  assert.match(body, /- \[BUZZOK-2\]/);
+  assert.match(body, /- \[PROJ-1\]/);
+  assert.match(body, /- \[PROJ-2\]/);
 });
 
 test('add-jira-link: updates the existing bot comment instead of duplicating', async () => {
@@ -99,7 +99,7 @@ test('add-jira-link: updates the existing bot comment instead of duplicating', a
   await runGithubScript(script, {
     github,
     context: ctx,
-    env: { TICKET_IDS: 'BUZZOK-9', PR_NUMBER: '7', JIRA_BASE_URL },
+    env: { TICKET_IDS: 'PROJ-9', PR_NUMBER: '7', JIRA_BASE_URL },
   });
 
   assert.equal(github.callsTo('rest.issues.createComment').length, 0, 'should not create');
@@ -122,7 +122,7 @@ test('add-jira-link: tolerates a ghost-author comment (user: null)', async () =>
   await runGithubScript(script, {
     github,
     context: ctx,
-    env: { TICKET_IDS: 'BUZZOK-9', PR_NUMBER: '7', JIRA_BASE_URL },
+    env: { TICKET_IDS: 'PROJ-9', PR_NUMBER: '7', JIRA_BASE_URL },
   });
 
   // Must not crash on the null author, and still find/update the bot comment.
@@ -143,7 +143,7 @@ test('add-jira-link: tolerates a comment with a null body', async () => {
   await runGithubScript(script, {
     github,
     context: ctx,
-    env: { TICKET_IDS: 'BUZZOK-9', PR_NUMBER: '7', JIRA_BASE_URL },
+    env: { TICKET_IDS: 'PROJ-9', PR_NUMBER: '7', JIRA_BASE_URL },
   });
 
   // No existing Jira comment matched -> creates one, without crashing.
@@ -166,7 +166,7 @@ test('add-jira-link: paginates so a comment on a later page is still found', asy
   await runGithubScript(script, {
     github,
     context: ctx,
-    env: { TICKET_IDS: 'BUZZOK-9', PR_NUMBER: '7', JIRA_BASE_URL },
+    env: { TICKET_IDS: 'PROJ-9', PR_NUMBER: '7', JIRA_BASE_URL },
   });
 
   const updated = github.callsTo('rest.issues.updateComment');

@@ -46,11 +46,11 @@ jobs:
           PR_TITLE: ${{ inputs.pr_title }}
           PR_BRANCH: ${{ inputs.pr_branch }}
         run: |
-          # Extract ticket ID(s) from PR title: [BUZZOK-12345] or [PROJECT-123]
+          # Extract ticket ID(s) from PR title: [PROJ-12345] or [PROJECT-123]
           # Multiple tickets are joined with commas so the output stays on one line
           TICKET_ID=$(printf '%s' "$PR_TITLE" | grep -oE '\[([A-Z]+-[0-9]+)\]' | tr -d '[]' | paste -sd ',' - || echo "")
 
-          # Fallback: extract from branch name, e.g. user/BUZZOK-2342-something or BUZZOK-1234
+          # Fallback: extract from branch name, e.g. user/PROJ-2342-something or PROJ-1234
           if [ -z "$TICKET_ID" ]; then
             TICKET_ID=$(printf '%s' "$PR_BRANCH" | grep -oE '[A-Z]+-[0-9]+' | head -1 || echo "")
           fi
