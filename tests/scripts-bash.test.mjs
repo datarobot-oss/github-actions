@@ -18,21 +18,21 @@ function extractTicket(env) {
 }
 
 test('jira extract: single [TICKET] in title', () => {
-  const r = extractTicket({ PR_TITLE: '[BUZZOK-123] Fix the thing', PR_BRANCH: 'main' });
+  const r = extractTicket({ PR_TITLE: '[PROJ-123] Fix the thing', PR_BRANCH: 'main' });
   assert.equal(r.code, 0, r.stderr);
   assert.equal(r.outputs['has-ticket'], 'true');
-  assert.equal(r.outputs['ticket-id'], 'BUZZOK-123');
+  assert.equal(r.outputs['ticket-id'], 'PROJ-123');
 });
 
 test('jira extract: multiple tickets join with commas', () => {
-  const r = extractTicket({ PR_TITLE: '[BUZZOK-1][PROJ-22] two tickets', PR_BRANCH: 'main' });
-  assert.equal(r.outputs['ticket-id'], 'BUZZOK-1,PROJ-22');
+  const r = extractTicket({ PR_TITLE: '[PROJ-1][PROJ-22] two tickets', PR_BRANCH: 'main' });
+  assert.equal(r.outputs['ticket-id'], 'PROJ-1,PROJ-22');
 });
 
 test('jira extract: falls back to branch name when title has none', () => {
-  const r = extractTicket({ PR_TITLE: 'no ticket here', PR_BRANCH: 'user/BUZZOK-2342-some-feature' });
+  const r = extractTicket({ PR_TITLE: 'no ticket here', PR_BRANCH: 'user/PROJ-2342-some-feature' });
   assert.equal(r.outputs['has-ticket'], 'true');
-  assert.equal(r.outputs['ticket-id'], 'BUZZOK-2342');
+  assert.equal(r.outputs['ticket-id'], 'PROJ-2342');
 });
 
 test('jira extract: no ticket anywhere -> has-ticket=false', () => {

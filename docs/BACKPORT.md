@@ -8,19 +8,18 @@ workflow. There are two ways to trigger it: **labels** (self-serve) and a
 ## TL;DR usage — labels
 
 1. Merge your fix to `main` as normal.
-2. Add a label to the PR: **`backport <branch>`** — e.g. `backport release/12.0`.
-   - Add several (`backport release/12.0`, `backport release/11.1`) to fan out.
+2. Add a label to the PR: **`backport <branch>`** — e.g. `backport release/X.Y`.
+   - Add several (`backport release/X.Y`, `backport release/X.Z`) to fan out.
    - You can add the label **before or after** merge; both work.
 3. The automation cherry-picks the merge onto that branch and opens a PR
-   assigned to you, titled `[Backport release/12.0] <original title>`.
+   assigned to you, titled `[Backport release/X.Y] <original title>`.
 4. The original PR gets a comment with the result and a **`backported <branch>`**
    label. The trigger label stays as the permanent record.
 
 ## TL;DR usage — manual run (no labels)
 
-Prefer to just point at a PR and a branch — like the old Jenkins "cherry-pick
-this PR to this branch" job? Or backporting to a one-off branch nobody made a
-label for?
+Prefer to point at a PR and a branch directly? Or backporting to a one-off
+branch nobody made a label for?
 
 1. Actions tab → **Backport** → **Run workflow**.
 2. Enter the **merged PR number** and the **target branch(es)** (space-separated
@@ -39,10 +38,10 @@ Nothing is dropped silently. The original PR gets:
 - a comment with the exact manual `git cherry-pick` commands to finish it by hand.
 
 ```bash
-git checkout release/12.0 && git pull
-git checkout -b backport/pr-<N>-release-12.0
+git checkout release/X.Y && git pull
+git checkout -b backport/pr-<N>-release-X.Y
 git cherry-pick <merge_sha>     # -m 1 for a merge commit
-# resolve, push, open a PR targeting release/12.0
+# resolve, push, open a PR targeting release/X.Y
 ```
 
 ## How it's wired (matches this repo's conventions)
@@ -58,7 +57,7 @@ To onboard a repo:
 1. Copy `examples/workflow-backport.yaml` into its `.github/workflows/`.
 2. **Create the labels.** Copy `examples/workflow-ensure-labels.yaml` too and run
    it once from the Actions tab, filling **Backport branches** with your release
-   lines (e.g. `release/12.0, release/11.1`). That creates each `backport <branch>`
+   lines (e.g. `release/X.Y, release/X.Z`). That creates each `backport <branch>`
    trigger label a dev applies by hand, its matching `backported <branch>`, and
    the fixed `backport-failed` / `do not merge` labels — all with sensible
    colours. (You can still create them by hand instead; the label-driven flow just
@@ -114,7 +113,9 @@ org-controlled accounts. Steps:
    - Where can it be installed: **Only on this account**.
 2. **Create**, then note the **App ID**. Under **Private keys**, **Generate a
    private key** (downloads a `.pem`).
-3. **Install App** → choose the repos that need backports (or All repositories).
+3. **Install App** → select **only** the repos that need backports. Avoid "All
+   repositories": the App holds `Contents: write` and `Pull requests: write`, so a
+   wider install grants write access to repos that never use it.
 4. Add two **org-level Actions secrets** (or per-repo) so the example workflow
    picks them up:
    - `BACKPORT_APP_ID` = the App ID

@@ -57,24 +57,24 @@ workflow, so it works unmodified:
 
 ```bash
 curl -o .github/workflows/pr-automation.yaml \
-  https://raw.githubusercontent.com/datarobot-oss/github-actions/0.0.18/examples/workflow-pr-automation.yaml
+  https://raw.githubusercontent.com/datarobot-oss/github-actions/0.0.20/examples/workflow-pr-automation.yaml
 ```
 
 Then run [`workflow-ensure-labels.yaml`](examples/workflow-ensure-labels.yaml) once from the Actions
 tab. It creates the labels the other workflows depend on, and it is idempotent, so re-running it is
 safe. Add any [secrets](#secrets) the workflow you chose needs.
 
-To upgrade later, bump the `@0.0.18` ref in the `uses:` lines to a newer
+To upgrade later, bump the `@0.0.20` ref in the `uses:` lines to a newer
 [tag](https://github.com/datarobot-oss/github-actions/tags), and read the
 [changelog](CHANGELOG.md) first.
 
 > [!TIP]
-> A git tag is a movable reference, so `@0.0.18` is a convenience, not a guarantee.
+> A git tag is a movable reference, so `@0.0.20` is a convenience, not a guarantee.
 > If you want the ref to be immutable, pin the commit SHA instead and keep the
 > version in a comment, the same way this repo pins its own dependencies:
 >
 > ```yaml
-> uses: datarobot-oss/github-actions/.github/workflows/backport.yaml@<full-sha>  # 0.0.18
+> uses: datarobot-oss/github-actions/.github/workflows/backport.yaml@<full-sha>  # 0.0.20
 > ```
 
 # Available workflows
@@ -97,16 +97,15 @@ Every workflow runs unmodified, but a few inputs decide whether the output makes
 DataRobot. Each one is set in your copy of the example, not in the reusable workflow, so upgrading
 never overwrites your choice.
 
-Inputs marked "needs a newer pin" below postdate the `@0.0.18` release the examples pin, so they
-appear commented out in the example. Passing an input the pinned version does not declare fails the
-run, so bump the `uses:` refs to a release that declares them before uncommenting.
-
 | Input | Workflow | Default | Set it when |
 |---|---|---|---|
-| `jira_base_url` | `add-jira-link.yaml` | DataRobot's Jira tenant | You have your own Jira. Otherwise the PR comment links to a tenant your readers cannot open. Set it to `''` to drop the Jira comment entirely. (Needs a newer pin.) |
-| `slack_mention` | `mark-pr-to-review.yaml` | empty (no mention) | You want reviewers pinged rather than relying on them watching the channel. Use a user group that exists in your workspace; Slack renders an unresolvable handle as plain text. (Needs a newer pin.) |
-| `status_icon_success` / `_failure` / `_pending` | `notify-slack.yaml` | `:white_check_mark:` / `:x:` / `:hourglass_flowing_sand:` | You want the digest's CI-status column to use custom emoji. Defaults are Slack built-ins, which exist in every workspace; a custom emoji name that is not installed renders as literal `:name:` text. (Needs a newer pin.) |
+| `jira_base_url` | `add-jira-link.yaml` | DataRobot's Jira tenant | You have your own Jira. Otherwise the PR comment links to a tenant your readers cannot open. Set it to `''` to drop the Jira comment entirely. |
+| `slack_mention` | `mark-pr-to-review.yaml` | empty (no mention) | You want reviewers pinged rather than relying on them watching the channel. Use a user group that exists in your workspace; Slack renders an unresolvable handle as plain text. |
+| `status_icon_success` / `_failure` / `_pending` | `notify-slack.yaml` | `:white_check_mark:` / `:x:` / `:hourglass_flowing_sand:` | You want the digest's CI-status column to use custom emoji. Defaults are Slack built-ins, which exist in every workspace; a custom emoji name that is not installed renders as literal `:name:` text. |
 | `header_icon` | `notify-slack.yaml` | `clipboard` | You want a different emoji at the head of the digest. |
+
+All of these require a pin of `0.0.20` or newer. If you pin an older release, remove the inputs it does
+not declare: passing an undeclared input to a reusable workflow is a hard error, not a warning.
 
 # Secrets
 

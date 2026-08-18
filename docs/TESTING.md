@@ -1,9 +1,10 @@
 # Testing the reusable workflows
 
 This repo's "product" is the reusable workflows under `.github/workflows/`, which
-~two dozen downstream repos consume by tag. Historically the only way to know a
-change was safe was to merge, tag, and watch real runs. These self-tests let a
-change be validated **on the PR**, before a release tag is cut.
+consuming repos reference by tag. Because a consumer runs the workflow rather than
+importing it, a change here is only observable once it is tagged and executed
+somewhere. These self-tests close that gap: they validate a change **on the PR**,
+before a release tag is cut.
 
 There are three checks, all run by CI (`.github/workflows/self-test.yaml`) and
 locally via [`go-task`](https://taskfile.dev):

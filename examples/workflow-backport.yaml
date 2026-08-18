@@ -83,7 +83,7 @@ jobs:
   # https://github.com/datarobot-oss/github-actions/blob/main/docs/BACKPORT.md
   backport:
     needs: prepare
-    uses: datarobot-oss/github-actions/.github/workflows/backport.yaml@0.0.18
+    uses: datarobot-oss/github-actions/.github/workflows/backport.yaml@0.0.20
     with:
       pr_number: ${{ github.event.pull_request.number }}
       label_pattern: ${{ needs.prepare.outputs.label_pattern }}
@@ -97,7 +97,7 @@ jobs:
   # Flow 2 (manual): backport the merged PR number + branch(es) from the dispatch form.
   backport-manual:
     if: github.event_name == 'workflow_dispatch'
-    uses: datarobot-oss/github-actions/.github/workflows/backport.yaml@0.0.18
+    uses: datarobot-oss/github-actions/.github/workflows/backport.yaml@0.0.20
     with:
       pr_number: ${{ fromJSON(inputs.pr_number) }}
       target_branches: ${{ inputs.target_branches }}
