@@ -14,6 +14,8 @@ Entries below 0.0.19 were backfilled from the
 than exhaustive.
 
 ## Unreleased
+
+## 0.0.23 - 2026-08-18
 - `create-release-on-merge.yaml` takes an optional `version` input. Left unset it behaves exactly as
   before: take the highest existing semver tag and bump its patch. Pass one and that exact string is
   tagged instead. This is for a repo where the version already lives in the tree, which is most Python
