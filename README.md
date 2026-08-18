@@ -34,16 +34,17 @@
 
 Reusable GitHub Actions workflows for pull-request automation, backporting, and releases.
 
-**What it does:** ships four drop-in workflows you copy into your own repo, each of which calls a
+**What it does:** ships drop-in workflows you copy into your own repo, each of which calls a
 versioned reusable workflow hosted here. They cover the mechanics most repos rebuild by hand: pinging
 Slack when a PR is ready for review, labelling approved PRs, linking Jira tickets, cherry-picking a
-merged PR onto release branches, and cutting a tagged release on merge. Nothing here is
-DataRobot-specific to run, and no DataRobot service is required.
+merged PR onto release branches, requiring a changelog entry, and cutting a tagged release on merge.
+Nothing here is DataRobot-specific to run, and no DataRobot service is required.
 
 # Table of contents
 
 - [Quick start](#quick-start)
 - [Available workflows](#available-workflows)
+- [Available actions](#available-actions)
 - [Configuration](#configuration)
 - [Secrets](#secrets)
 - [Documentation](#documentation)
@@ -85,11 +86,38 @@ To upgrade later, bump the `@0.0.20` ref in the `uses:` lines to a newer
 | [`workflow-backport.yaml`](examples/workflow-backport.yaml) | Cherry-picks a merged PR onto one or more release branches, opening a PR per branch | `backport <branch>` label on a merged PR, or manual dispatch | `BACKPORT_APP_ID`, `BACKPORT_APP_PRIVATE_KEY` (both optional) |
 | [`workflow-ensure-labels.yaml`](examples/workflow-ensure-labels.yaml) | Creates the labels the other workflows require. Idempotent; run once at setup | manual dispatch | none |
 | [`workflow-create-release-on-merge.yaml`](examples/workflow-create-release-on-merge.yaml) | Tags the next patch version and cuts a GitHub release | push to `main` | none |
+| [`workflow-create-release-from-pyproject.yaml`](examples/workflow-create-release-from-pyproject.yaml) | Tags the version `pyproject.toml` declares and cuts a GitHub release. No-ops when the version was not bumped | push to `main` | none |
+| [`workflow-check-changelog.yaml`](examples/workflow-check-changelog.yaml) | Fails a PR that did not update `CHANGELOG.md`. Waivable with a label | pull request | none |
+| [`workflow-check-changelog-versioned.yaml`](examples/workflow-check-changelog-versioned.yaml) | The same, but also requires a heading for the version `pyproject.toml` declares | pull request | none |
+
+The last three are the release story, and [docs/RELEASE.md](docs/RELEASE.md) explains which pair to
+pick: it comes down to whether a version string already exists inside your repo, or lives only in
+your git tags.
 
 The PR-automation and backport workflows depend on labels that
 [`workflow-ensure-labels.yaml`](examples/workflow-ensure-labels.yaml) creates. A missing label
 hard-fails the job on purpose, so a setup problem shows up as a red X rather than silently doing
 nothing.
+
+# Available actions
+
+Reusable workflows are whole jobs. An action is a step, so it runs inside a job you already have and
+its outputs are available to everything after it.
+
+| Action | What it does |
+|---|---|
+| [`actions/read-pyproject-version`](actions/read-pyproject-version) | Reads `[project].version` out of a `pyproject.toml` and exposes it as a step output, for handing to `create-release-on-merge.yaml` or `check-changelog.yaml` |
+
+```yaml
+- uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+- id: version
+  uses: datarobot-oss/github-actions/actions/read-pyproject-version@0.0.22
+- run: echo "${{ steps.version.outputs.version }}"
+```
+
+It reads the file with `tomllib` rather than a `grep`, because `version` also appears under
+`[build-system]` and inside dependency specs. That needs Python 3.11+ on the runner, which every
+current GitHub-hosted image has.
 
 # Configuration
 
@@ -103,8 +131,17 @@ never overwrites your choice.
 | `slack_mention` | `mark-pr-to-review.yaml` | empty (no mention) | You want reviewers pinged rather than relying on them watching the channel. Use a user group that exists in your workspace; Slack renders an unresolvable handle as plain text. |
 | `status_icon_success` / `_failure` / `_pending` | `notify-slack.yaml` | `:white_check_mark:` / `:x:` / `:hourglass_flowing_sand:` | You want the digest's CI-status column to use custom emoji. Defaults are Slack built-ins, which exist in every workspace; a custom emoji name that is not installed renders as literal `:name:` text. |
 | `header_icon` | `notify-slack.yaml` | `clipboard` | You want a different emoji at the head of the digest. |
+| `version` | `create-release-on-merge.yaml` | empty (bump the latest tag's patch) | Your version already lives in the repo. Pass it and that exact string is tagged, so the tag and the packaged artifact cannot drift. Requires `0.0.22`. |
+| `version` | `check-changelog.yaml` | empty (only check the file moved) | You know the version while the PR is open, so the entry can be filed under it. The check then also requires a heading naming that version. Requires `0.0.22`. |
+| `changelog_path` | `check-changelog.yaml` | `CHANGELOG.md` | Your changelog is somewhere else. Requires `0.0.22`. |
+| `skip_label` | `check-changelog.yaml` | `skip-changelog` | You already have a label for this. It does not need to exist until someone applies it. Requires `0.0.22`. |
+| `skip_bot_authors` | `check-changelog.yaml` | `true` | Set it to `false` to hold bot-authored PRs to the same rule. Leaving it on means Dependabot bumps do not each need a label. Requires `0.0.22`. |
 
-All of these require a pin of `0.0.20` or newer. If you pin an older release, remove the inputs it does
+The `create-release-on-merge.yaml` workflow also has outputs at `0.0.22` and newer: `version` and
+`released`. Gate a follow-on publish job on `released == 'true'` rather than on the release job
+succeeding, because a merge that did not bump the version succeeds without publishing anything.
+
+Most of these require a pin of `0.0.20` or newer, and the ones marked above require `0.0.22`. If you pin an older release, remove the inputs it does
 not declare: passing an undeclared input to a reusable workflow is a hard error, not a warning.
 
 # Secrets
@@ -117,6 +154,8 @@ not declare: passing an undeclared input to a reusable workflow is a hard error,
 
 # Documentation
 
+- [docs/RELEASE.md](docs/RELEASE.md) covers the two release models, the changelog gate, and how the
+  version reader ties them together. Read it before picking a release workflow.
 - [docs/BACKPORT.md](docs/BACKPORT.md) covers the backport flow in depth: label conventions, the
   manual dispatch path, conflict handling, and the one-time GitHub App setup.
 - [docs/TESTING.md](docs/TESTING.md) covers how the workflows are tested and how to add tests for a

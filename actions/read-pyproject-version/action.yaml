@@ -1,0 +1,118 @@
+name: Read pyproject.toml version
+description: >-
+  Read `[project].version` out of a pyproject.toml and expose it as a step
+  output, so a release workflow can tag exactly what the packaged artifact
+  declares instead of computing a version of its own.
+author: DataRobot
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Read pyproject.toml version
+#
+# For repos where the version already lives in the tree. `pyproject.toml` is what
+# goes into the wheel, so it is what `yourtool --version` reports. If a release
+# tag were computed independently of it, a wheel installed from tag 1.4.2 could
+# report something else entirely and there would be no way to tell two builds
+# apart. Reading the version rather than computing it keeps the tag, the wheel,
+# and `--version` identical by construction.
+#
+# Pair it with `create-release-on-merge.yaml`, which takes the result as its
+# optional `version` input. See examples/workflow-create-release-from-pyproject.yaml.
+#
+# REQUIREMENTS
+# - The job must have run `actions/checkout` first; this reads the working tree.
+# - Python 3.11+ on PATH (`tomllib` landed in 3.11). Every current GitHub-hosted
+#   runner image satisfies this; a self-hosted runner may not, so the step says
+#   so explicitly rather than failing on an ImportError traceback.
+# ─────────────────────────────────────────────────────────────────────────────
+
+inputs:
+  path:
+    description: 'Path to the pyproject.toml to read, relative to the workspace.'
+    required: false
+    default: 'pyproject.toml'
+  require_semver:
+    description: >-
+      Fail unless the version is a plain X.Y.Z. Leave this on when the version
+      becomes a git tag and a release name, which is the case for
+      create-release-on-merge.yaml. Turn it off only if you need to read a
+      version this action would otherwise reject (a PEP 440 prerelease like
+      1.4.2rc1, or a dev build) for some other purpose.
+    required: false
+    default: 'true'
+
+outputs:
+  version:
+    description: 'The version declared in the file, e.g. `1.4.2`.'
+    value: ${{ steps.read.outputs.version }}
+
+runs:
+  using: composite
+  steps:
+    - name: Read the version from pyproject.toml
+      id: read
+      shell: bash
+      env:
+        # Via env rather than `${{ }}` interpolated into the script body: an
+        # input is caller-controlled and would otherwise be expanded into bash
+        # source before bash ever parses the line.
+        PYPROJECT_PATH: ${{ inputs.path }}
+        REQUIRE_SEMVER: ${{ inputs.require_semver }}
+      run: |
+        set -euo pipefail
+
+        if [ ! -f "$PYPROJECT_PATH" ]; then
+          echo "::error::No file at '$PYPROJECT_PATH'. This action reads the checked-out working tree, so the job has to run actions/checkout before it." >&2
+          exit 1
+        fi
+
+        if ! command -v python3 >/dev/null 2>&1; then
+          echo "::error::python3 is not on PATH. Add actions/setup-python before this step, or use a runner image that ships Python 3.11+." >&2
+          exit 1
+        fi
+
+        # tomllib rather than a grep: `version` also appears under
+        # [build-system] and in dependency specs, and a regex over the whole
+        # file picks the wrong one as soon as the layout changes.
+        version="$(python3 - "$PYPROJECT_PATH" <<'PY'
+        import sys
+
+        try:
+            import tomllib
+        except ModuleNotFoundError:
+            sys.exit(
+                "::error::Reading pyproject.toml needs Python 3.11 or newer (tomllib); "
+                "this runner has %s. Add actions/setup-python before this step."
+                % sys.version.split()[0]
+            )
+
+        path = sys.argv[1]
+
+        try:
+            with open(path, "rb") as fh:
+                data = tomllib.load(fh)
+        except tomllib.TOMLDecodeError as exc:
+            sys.exit("::error::%s is not valid TOML: %s" % (path, exc))
+
+        version = data.get("project", {}).get("version")
+        if version is None:
+            sys.exit(
+                "::error::%s declares no [project] version. A project whose version is "
+                "dynamic (setuptools-scm, hatch-vcs) has nothing here for this action to "
+                "read." % path
+            )
+
+        print(version)
+        PY
+        )"
+
+        # Plain X.Y.Z only, by default. The release workflow uses this string
+        # verbatim as a git tag and a release name, so anything exotic here
+        # becomes an exotic git ref that consumers then have to pin to.
+        if [ "${REQUIRE_SEMVER:-true}" = 'true' ] \
+          && ! printf '%s' "$version" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+          echo "::error::${PYPROJECT_PATH} version '$version' is not a plain X.Y.Z version. Set require_semver: 'false' if that is deliberate." >&2
+          exit 1
+        fi
+
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+        echo "$PYPROJECT_PATH declares version $version"
