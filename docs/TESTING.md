@@ -1,9 +1,9 @@
 # Testing the reusable workflows
 
-This repo's "product" is the reusable workflows under `.github/workflows/`, which
-consuming repos reference by tag. Because a consumer runs the workflow rather than
-importing it, a change here is only observable once it is tagged and executed
-somewhere. These self-tests close that gap: they validate a change **on the PR**,
+This repo's "product" is the reusable workflows under `.github/workflows/` and
+the composite actions under `actions/`, which consuming repos reference by tag.
+Because a consumer runs them rather than importing them, a change here is only
+observable once it is tagged and executed somewhere. These self-tests close that gap: they validate a change **on the PR**,
 before a release tag is cut.
 
 There are three checks, all run by CI (`.github/workflows/self-test.yaml`) and
@@ -31,25 +31,33 @@ The tests **do not** reimplement the workflow logic. Instead the harness
 (`tests/helpers/`) loads each workflow YAML and pulls the embedded `run:` and
 `with.script:` blocks straight out of it, then executes them against fakes:
 
-- `workflow.mjs` — load a workflow, find a step by `id`/`name`, return its
-  `run` (bash) or `with.script` (JS) body.
+- `workflow.mjs` — load a workflow (`loadWorkflow`) or a composite action
+  (`loadAction`), find a step by `id`/`name`, return its `run` (bash) or
+  `with.script` (JS) body. A workflow keeps its steps under each job and an
+  action keeps them under `runs.steps`; both feed the same selectors.
 - `github-script.mjs` — run a github-script body against a fake Octokit
   (`makeGithub`) that records every API call for assertions.
 - `bash.mjs` — run a `run:` block under `bash -eo pipefail` (matching GitHub's
   default shell), with `$GITHUB_OUTPUT` / `$GITHUB_ENV` wired to temp files and
-  parsed back out.
+  parsed back out. Pass `cwd` for a step that reads repo files (a changelog, a
+  `pyproject.toml`) rather than only environment variables.
 - `stubs/` — deterministic, offline `curl`, `gh`, `git`, and `date` on `PATH`.
   `curl` serves GET fixtures by URL and captures POSTs (so a test can assert
-  exactly what would be sent to Slack); `date` makes GNU-style `date -d` work on
-  macOS too and pins "now" for stable waiting-time math.
+  exactly what would be sent to Slack); `git` answers `tag --list`,
+  `rev-parse --verify refs/tags/X`, and `diff --name-only` from `__GIT_TAGS` /
+  `__GIT_DIFF_FILES`; `date` makes GNU-style `date -d` work on macOS too and pins
+  "now" for stable waiting-time math.
+
+A stub fails loud on any call it does not implement, so a new call site in a
+workflow shows up as a test failure rather than silently returning nothing.
 
 Because the bodies come from the YAML, the production workflows stay
 byte-for-byte what downstream repos consume, and a test can never silently drift
 from what ships.
 
-## Adding tests for a new workflow
+## Adding tests for a new workflow or action
 
-When you add or change a workflow, give its logic a test:
+When you add or change one, give its logic a test:
 
 1. **github-script step** — grab the body and assert on the recorded API calls:
 
@@ -67,6 +75,18 @@ When you add or change a workflow, give its logic a test:
    const r = runBash(script, { env: { FOO: 'bar' }, curlFixtures: [{ match: 'pulls/1', body: {...} }] });
    assert.equal(r.outputs['some-output'], 'expected');
    ```
+
+3. **composite action step** — same as a bash step, but loaded with
+   `loadAction`, and usually run against a scratch directory:
+
+   ```js
+   const script = runScript(loadAction('read-pyproject-version'), { id: 'read' });
+   const r = runBash(script, { cwd: sandbox({ 'pyproject.toml': '[project]\nversion = "1.0.0"\n' }) });
+   assert.equal(r.outputs.version, '1.0.0');
+   ```
+
+   `sandbox()` in `tests/scripts-bash.test.mjs` builds that directory from a
+   `{ path: contents }` map.
 
 Select steps by their `id` when they have one, otherwise by a substring of
 `name`. `findStep` throws if zero or more than one step matches, so a renamed

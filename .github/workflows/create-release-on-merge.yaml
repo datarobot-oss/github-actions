@@ -1,7 +1,52 @@
 name: Create Release
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Create Release
+#
+# Two modes, chosen by whether the caller passes `version`:
+#
+#   auto (no `version`)  — scan the existing tags, bump the patch, tag that.
+#     The right default for a repo whose version lives nowhere but in its tags.
+#
+#   explicit (`version` passed) — tag exactly that string. For a repo where the
+#     version already lives in the tree (pyproject.toml, package.json, a VERSION
+#     file), so the tag, the packaged artifact, and what the tool reports for
+#     `--version` stay identical by construction. See
+#     actions/read-pyproject-version and
+#     examples/workflow-create-release-from-pyproject.yaml.
+#
+# In explicit mode a merge no longer always cuts a release: if the version was
+# not bumped, the tag already exists and this exits with a notice rather than a
+# red X on the default branch. That is deliberate. A re-run on an unchanged main
+# has to be a no-op, and a CI-only tweak should not mint a version consumers
+# have to reason about.
+# ─────────────────────────────────────────────────────────────────────────────
+
 on:
   workflow_call:
+    inputs:
+      version:
+        description: >-
+          Explicit version to release, e.g. read out of pyproject.toml by
+          actions/read-pyproject-version. Must be a plain X.Y.Z. Leave unset to
+          keep the original behaviour: take the highest existing semver tag and
+          bump its patch.
+        required: false
+        default: ''
+        type: string
+    outputs:
+      version:
+        description: >-
+          The version this run resolved, whether supplied or computed. Set even
+          when nothing was released, so a caller can tell which version the tag
+          collision was against.
+        value: ${{ jobs.release.outputs.version }}
+      released:
+        description: >-
+          `true` if a tag and release were created, `false` if the tag already
+          existed and the run was a no-op. Gate follow-on jobs (publish a wheel,
+          push an image) on this rather than on the job's success.
+        value: ${{ jobs.release.outputs.released }}
 
 jobs:
   release:
@@ -10,14 +55,22 @@ jobs:
     permissions:
       contents: write
       pull-requests: read
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      released: ${{ steps.resolve.outputs.released }}
     steps:
       - name: Checkout
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
+          # Full history, so every existing tag is visible to the scan and to the
+          # collision check below. A shallow checkout would make an existing tag
+          # look absent and the release would fail on a duplicate ref instead.
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
       - name: Get latest tag
         id: get-latest-tag
+        # Auto mode only. Nothing needs scanning when the caller named a version.
+        if: inputs.version == ''
         run: |
           # Get the latest semver tag (with or without v prefix), or use 0.0.0 if no tags exist.
           # The trailing `|| true` is required: under `bash -eo pipefail` (GitHub's default
@@ -31,6 +84,7 @@ jobs:
           echo "Latest tag: $LATEST_TAG"
       - name: Generate next version
         id: next-version
+        if: inputs.version == ''
         run: |
           LATEST_TAG="${{ steps.get-latest-tag.outputs.latest-tag }}"
           # Remove v prefix if present for version calculation
@@ -54,11 +108,55 @@ jobs:
           NEW_VERSION="$MAJOR.$MINOR.$PATCH"
           echo "new-version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
           echo "Next version: $NEW_VERSION"
+      # One place decides what gets tagged, so both modes go through the same
+      # validation and the same collision check.
+      - name: Resolve the version to release
+        id: resolve
+        env:
+          # Via env, not `${{ }}` in the script body: a workflow_call input is
+          # caller-controlled and would otherwise be expanded into bash source
+          # before bash ever parses the line.
+          SUPPLIED_VERSION: ${{ inputs.version }}
+          COMPUTED_VERSION: ${{ steps.next-version.outputs.new-version }}
+        run: |
+          set -euo pipefail
+
+          if [ -n "${SUPPLIED_VERSION:-}" ]; then
+            VERSION="$SUPPLIED_VERSION"
+            SOURCE="supplied by the caller"
+          else
+            VERSION="${COMPUTED_VERSION:-}"
+            SOURCE="computed from the latest tag"
+          fi
+
+          # Plain X.Y.Z only. This string becomes a git tag and a release name
+          # verbatim, and consumers pin to it, so anything exotic here becomes an
+          # exotic ref that every downstream repo then has to quote.
+          if ! printf '%s' "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Version '$VERSION' ($SOURCE) is not a plain X.Y.Z version." >&2
+            exit 1
+          fi
+
+          # Not an error. In explicit mode a merge whose change deliberately did
+          # not bump the version finds its tag already present, and a re-run on an
+          # unchanged main has to be a no-op rather than a red X on the default
+          # branch. In auto mode a collision means a tag exists that the semver
+          # scan did not see, and skipping still beats failing the merge.
+          if git rev-parse -q --verify "refs/tags/${VERSION}" >/dev/null; then
+            echo "::notice::Tag ${VERSION} already exists; nothing to release."
+            echo "released=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Releasing $VERSION ($SOURCE)."
+            echo "released=true" >> "$GITHUB_OUTPUT"
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
       - name: Create Release
+        if: steps.resolve.outputs.released == 'true'
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
-          tag_name: ${{ steps.next-version.outputs.new-version }}
-          name: "${{ steps.next-version.outputs.new-version }}"
+          tag_name: ${{ steps.resolve.outputs.version }}
+          name: "${{ steps.resolve.outputs.version }}"
           generate_release_notes: true
           draft: false
           prerelease: false

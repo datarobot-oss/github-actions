@@ -1,0 +1,51 @@
+name: Changelog
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Check Changelog (versioned)
+# Fails a pull request unless CHANGELOG.md changed AND carries a heading for the
+# version pyproject.toml declares. Waivable per pull request with the
+# `skip-changelog` label.
+#
+# Use this variant alongside workflow-create-release-from-pyproject.yaml. There,
+# the version bump in a pull request diff IS the release decision, so the entry
+# can be filed under its number while the pull request is open. If your version
+# is computed at release time instead, use workflow-check-changelog.yaml, which
+# only checks that the file moved.
+# ─────────────────────────────────────────────────────────────────────────────
+# REQUIRED LABELS
+# - None. `skip-changelog` only has to exist once someone wants to use it.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Triggered by: every pull request. `labeled` and `unlabeled` are on the list
+# because naming any type replaces the defaults, and without them applying the
+# skip label could not re-run the check that told you to apply it.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+jobs:
+  # Read the version this pull request would release.
+  version:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      # Pinned by SHA with the version in a comment. Once this file is in your
+      # repo, your own Dependabot config keeps the pin fresh.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - id: version
+        uses: datarobot-oss/github-actions/actions/read-pyproject-version@0.0.22
+
+  # Require an entry filed under that version.
+  changelog:
+    needs: version
+    uses: datarobot-oss/github-actions/.github/workflows/check-changelog.yaml@0.0.22
+    with:
+      version: ${{ needs.version.outputs.version }}
+    permissions:
+      contents: read

@@ -15,6 +15,46 @@ than exhaustive.
 
 ## Unreleased
 
+## 0.0.23 - 2026-08-18
+- `create-release-on-merge.yaml` takes an optional `version` input. Left unset it behaves exactly as
+  before: take the highest existing semver tag and bump its patch. Pass one and that exact string is
+  tagged instead. This is for a repo where the version already lives in the tree, which is most Python
+  packages: `pyproject.toml` is what goes into the wheel, so it is what the installed tool reports for
+  `--version`, and a tag computed independently of it can silently disagree with the artifact it names.
+  Passing the version means the tag, the wheel, and `--version` stay identical by construction.
+- The same workflow now has `version` and `released` outputs. In the new mode a merge no longer always
+  cuts a release: a pull request that did not bump the version leaves the tag already present, so the
+  job exits with a notice rather than a red X on the default branch. Gate any follow-on publish job on
+  `released == 'true'` rather than on the release job succeeding, or it will run on merges that
+  published nothing. The tag-collision check applies in the original mode too: a computed version that
+  the semver tag scan somehow missed is now skipped with a notice instead of failing the merge.
+- New `actions/read-pyproject-version` composite action, the first entry in a new `actions/` directory.
+  It reads `[project].version` out of a `pyproject.toml` and exposes it as a step output, for handing
+  to `create-release-on-merge.yaml`. It parses with `tomllib` rather than grepping: `version` also
+  appears under `[build-system]` and inside dependency specs, so a regex over the whole file picks the
+  wrong one as soon as the layout changes. Needs Python 3.11+ on the runner, which every current
+  GitHub-hosted image has. It ships as an action rather than a reusable workflow so the version is a
+  step output inside a job you already have, usable by everything after it.
+- New `check-changelog.yaml` reusable workflow. It fails a pull request that did not update
+  `CHANGELOG.md`, and when passed a `version` it additionally requires a heading naming that version,
+  so a consumer landing on a tag has something to read. Inputs: `version`, `changelog_path`,
+  `skip_label`, `skip_bot_authors`.
+- This repo's own changelog check is now a caller of that workflow instead of an inline job, which is
+  how it gets tested before it is tagged. **This renames the status check** from `Changelog updated` to
+  `Changelog / Changelog updated`, because GitHub prefixes a reusable workflow's job with the caller's.
+  Branch protection has to be repointed at the new name.
+- The bot exemption on that check is now any author whose login ends in `[bot]`, rather than a
+  hardcoded list of `dependabot[bot]` and `github-actions[bot]`. A repo using Renovate or its own App
+  got no exemption before and had to label every automated pull request.
+- Three new examples: `workflow-create-release-from-pyproject.yaml`, `workflow-check-changelog.yaml`,
+  and `workflow-check-changelog-versioned.yaml`. They pin `@0.0.22` rather than `@0.0.20` like the
+  older examples, because `0.0.22` is the first release that contains any of this. New docs at
+  [docs/RELEASE.md](docs/RELEASE.md) explain which release model to pick and why the choice follows
+  from where your version already lives.
+- The test harness grew `loadAction` for composite actions and a `cwd` option on `runBash` for steps
+  that read repo files. The `git` stub answers `rev-parse --verify` and `diff --name-only`, and the
+  `date` stub handles `%Y-%m-%d`.
+
 
 ## 0.0.21 - 2026-08-17
 - Examples now pin `@0.0.20` instead of `@0.0.18`, and the README quick start matches. `0.0.20` is the

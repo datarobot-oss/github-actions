@@ -41,9 +41,11 @@ function parseEnvFile(text) {
  *  - templateVars: values for any `${{ }}` expressions embedded in the bash.
  *  - now: pin "now" (epoch seconds) for deterministic date math.
  *  - curlFixtures: [{match, body}] served to GET curls by URL substring.
+ *  - cwd: working directory for the script, for steps that read repo files
+ *    (a changelog, a pyproject.toml) rather than only environment variables.
  * Returns { code, stdout, stderr, outputs, exportedEnv, posts }.
  */
-export function runBash(script, { env = {}, templateVars = {}, now, curlFixtures = [] } = {}) {
+export function runBash(script, { env = {}, templateVars = {}, now, curlFixtures = [], cwd } = {}) {
   const rendered = renderTemplate(script, templateVars);
   const dir = mkdtempSync(join(tmpdir(), 'wf-bash-'));
   const scriptPath = join(dir, 'step.sh');
@@ -56,6 +58,7 @@ export function runBash(script, { env = {}, templateVars = {}, now, curlFixtures
 
   const result = spawnSync('bash', ['-eo', 'pipefail', scriptPath], {
     encoding: 'utf8',
+    ...(cwd !== undefined ? { cwd } : {}),
     env: {
       PATH: `${STUBS_DIR}:${process.env.PATH}`,
       GITHUB_OUTPUT: outPath,
