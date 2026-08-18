@@ -16,6 +16,27 @@ than exhaustive.
 ## Unreleased
 
 
+## 0.0.21 - 2026-08-17
+- Examples now pin `@0.0.20` instead of `@0.0.18`, and the README quick start matches. `0.0.20` is the
+  first release that declares `slack_mention`, `jira_base_url`, and the `status_icon_*` set, so those
+  inputs are no longer commented out in `examples/workflow-pr-automation.yaml`. Every input each
+  example passes is verified against the reusable workflow at the pinned tag, because passing an input
+  the pinned release does not declare is a hard error rather than a warning.
+- `backport.yaml` now passes `repositories:` to `actions/create-github-app-token`, scoping the token to
+  the repo being backported. Without it the token inherits every repo the App is installed on, so a
+  broadly-installed App handed the job write access far beyond the repo in question. The setup doc no
+  longer suggests installing the App on "All repositories" either.
+- The internal Jira key `BUZZOK` is gone from workflow comments and test fixtures, replaced with
+  `PROJ`. The ticket regex is generic (`[A-Z]+-[0-9]+`), so this is a documentation change with no
+  behaviour change. Historical `CHANGELOG` and commit-message references are left alone.
+- `release/12.0` is no longer the worked example in docs and input descriptions. It named an unreleased
+  version; the examples now use `release/X.Y`, which reads as a placeholder.
+- `docs/TESTING.md` no longer quantifies how many downstream repos consume this one, and
+  `docs/BACKPORT.md` no longer references an internal Jenkins job. Both explained the *why* by pointing
+  at internal context a reader outside DataRobot cannot see; they now explain it directly.
+- `.github/CONTRIBUTING.md` names `@datarobot-oss/buzok` as the maintaining team alongside the
+  individual maintainer, matching CODEOWNERS, so a contributor knows where a review request goes.
+
 ## 0.0.20 - 2026-08-14
 - `add-jira-link` takes a `jira_base_url` input. The DataRobot Jira host used to be hardcoded in the
   middle of the comment-building script, so every consumer posted links only DataRobot staff could

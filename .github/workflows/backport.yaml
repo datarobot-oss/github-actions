@@ -3,7 +3,7 @@ name: Backport merged PR
 # Reusable workflow: cherry-pick a merged PR onto one or more target branches.
 #
 # Triggered by labels of the form `backport <branch>` on a merged PR
-# (e.g. `backport release/12.0`). Add several labels to backport to several
+# (e.g. `backport release/X.Y`). Add several labels to backport to several
 # branches at once. The destination is encoded in the label, so there is nothing
 # else to configure per-PR.
 #
@@ -37,7 +37,7 @@ on:
         type: string
         default: '^backport ([^ ]+)$'
       target_branches:
-        description: "Space-delimited branch(es) to backport onto directly, without labels — for the manual/dispatch flow (e.g. 'release/12.0 release/11.0'). Empty in the label-driven flow."
+        description: "Space-delimited branch(es) to backport onto directly, without labels — for the manual/dispatch flow (e.g. 'release/X.Y release/X.Z'). Empty in the label-driven flow."
         required: false
         type: string
         default: ''
@@ -68,6 +68,10 @@ jobs:
         with:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          # Scope the token to this repo only. Without it the token inherits every
+          # repo the App is installed on, so a broadly-installed App would hand
+          # this job write access well beyond the repo being backported.
+          repositories: ${{ github.event.repository.name }}
 
       - name: Checkout
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
