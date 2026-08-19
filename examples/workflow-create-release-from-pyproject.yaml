@@ -1,0 +1,82 @@
+name: Create Release on Merge to Main
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Create Release on Merge to Main (version from pyproject.toml)
+# On every push to main, tags the version pyproject.toml declares and cuts a
+# GitHub release for it. If that tag already exists, does nothing.
+#
+# Use this variant when your version lives in the repo. `pyproject.toml` is what
+# goes into the wheel, so it is what `yourtool --version` reports. Tagging what
+# the file says keeps the tag, the wheel, and `--version` identical by
+# construction; computing the tag separately lets them drift, and then there is
+# no way to tell two builds apart.
+#
+# If your version lives nowhere but in your tags, use
+# workflow-create-release-on-merge.yaml instead. It bumps the patch for you and
+# needs no job below.
+# ─────────────────────────────────────────────────────────────────────────────
+# REQUIRED LABELS
+# - None.
+# ─────────────────────────────────────────────────────────────────────────────
+# THE CONSEQUENCE OF THIS VARIANT
+# A merge no longer always cuts a release. A pull request that did not bump the
+# version leaves the tag already present, so the release job exits with a notice
+# instead of publishing. That is the point: a CI-only tweak should not mint a
+# version consumers have to reason about. It also means nothing stops a pull
+# request from forgetting the bump, so pair this with a pull-request gate. See
+# workflow-check-changelog-versioned.yaml.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Triggered by: every push to main (i.e. a merged PR).
+on:
+  push:
+    branches: ["main"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # Read [project].version out of pyproject.toml and hand it to the release job.
+  # This runs in your own job rather than inside the reusable workflow so the
+  # version is also available to anything else you add below.
+  version:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      # Pinned by SHA with the version in a comment. Once this file is in your
+      # repo, your own Dependabot config keeps the pin fresh.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - id: version
+        uses: datarobot-oss/github-actions/actions/read-pyproject-version@0.0.22
+        # Both inputs are optional and shown at their defaults.
+        with:
+          path: pyproject.toml
+          require_semver: 'true'
+
+  # Tag that version and cut the release. Skips quietly if the tag exists.
+  release:
+    needs: version
+    uses: datarobot-oss/github-actions/.github/workflows/create-release-on-merge.yaml@0.0.22
+    with:
+      version: ${{ needs.version.outputs.version }}
+    permissions:
+      contents: write
+      pull-requests: read
+
+  # Optional: anything that should happen only when a release was actually cut.
+  # Gate it on the `released` output, not on the release job succeeding: a
+  # no-bump merge succeeds without publishing anything.
+  #
+  # publish:
+  #   needs: release
+  #   if: needs.release.outputs.released == 'true'
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - run: echo "Publishing ${{ needs.release.outputs.version }}"

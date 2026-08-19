@@ -1,0 +1,150 @@
+name: Check Changelog
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Check Changelog
+#
+# A pull-request policy gate. Consumers pin a repo by tag, and the changelog is
+# usually the only thing telling them whether a bump is safe, so "did anyone
+# write down what changed" is worth enforcing rather than encouraging.
+#
+# Two modes, chosen by whether the caller passes `version`:
+#
+#   naive (no `version`) — the changelog file changed against the base branch.
+#     Right for a repo whose version is computed at release time, where nobody
+#     knows the number yet while the pull request is open.
+#
+#   versioned (`version` passed) — the file changed AND carries a heading for
+#     that exact version. Right for a repo where the version lives in the tree
+#     and the bump in the diff IS the release decision, so the entry can be
+#     filed under its number straight away. Pair it with
+#     actions/read-pyproject-version.
+#
+# Both modes are skippable per pull request with a label, `skip-changelog` by
+# default, for changes with no consumer-visible effect.
+#
+# CALLING IT: the caller supplies the trigger, and that trigger has to include
+# the `labeled` and `unlabeled` types. Without them the failure message tells a
+# contributor to apply a label that cannot re-run the check, leaving the pull
+# request red until the next push. See examples/workflow-check-changelog.yaml.
+# ─────────────────────────────────────────────────────────────────────────────
+# REQUIRED LABELS
+# - None. The skip label is optional and only has to exist if someone uses it.
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: >-
+          Version this pull request releases, e.g. read out of pyproject.toml.
+          When set, the changelog must also carry a heading naming it. Leave
+          unset to only check that the file changed.
+        required: false
+        default: ''
+        type: string
+      changelog_path:
+        description: 'Path to the changelog, relative to the repository root.'
+        required: false
+        default: 'CHANGELOG.md'
+        type: string
+      skip_label:
+        description: >-
+          Pull-request label that waives the check. Set it to your own label name
+          if you already have one; the label does not need to exist until someone
+          applies it.
+        required: false
+        default: 'skip-changelog'
+        type: string
+      skip_bot_authors:
+        description: >-
+          Waive the check for pull requests opened by a bot account (any login
+          ending in `[bot]`). Dependabot and friends cannot edit a changelog, and
+          their titles already land in auto-generated release notes, so without
+          this every dependency bump needs a label before it can merge.
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  check-changelog:
+    name: Changelog updated
+    # Keyed off the pull request author, not `github.actor`: on a `labeled` event
+    # the actor is whoever applied the label. A repo whose own automation labels
+    # pull requests as `github-actions[bot]` would otherwise skip the check on
+    # human pull requests and run it on the bot's.
+    if: >-
+      !contains(github.event.pull_request.labels.*.name, inputs.skip_label) &&
+      !(inputs.skip_bot_authors && endsWith(github.event.pull_request.user.login, '[bot]'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          # Full history so the merge-base with the target branch is available.
+          fetch-depth: 0
+      - name: Check the changelog
+        id: check-changelog
+        env:
+          # Via env, not `${{ }}` in the script body: a branch name is
+          # attacker-controlled on a fork pull request, and the inputs are
+          # caller-controlled. Either would otherwise be expanded into bash
+          # source before bash ever parses the line.
+          BASE_REF: ${{ github.base_ref }}
+          CHANGELOG_PATH: ${{ inputs.changelog_path }}
+          VERSION: ${{ inputs.version }}
+          SKIP_LABEL: ${{ inputs.skip_label }}
+        run: |
+          set -euo pipefail
+
+          # `github.base_ref` is only populated on a pull_request event. Saying so
+          # beats a `git diff origin/...HEAD` that fails with a bare "unknown
+          # revision" three lines into someone else's workflow.
+          if [ -z "${BASE_REF:-}" ]; then
+            echo "::error::No base branch on this event. check-changelog.yaml has to be called from a pull_request trigger." >&2
+            exit 1
+          fi
+
+          BASE="origin/${BASE_REF}"
+
+          # --- 1. the changelog moved --------------------------------------
+          if ! git diff --name-only "${BASE}...HEAD" | grep -qxF "$CHANGELOG_PATH"; then
+            cat >&2 <<EOF
+          ::error::${CHANGELOG_PATH} was not updated.
+
+          Add an entry saying what changed and why a consumer would care.
+
+          If this change has no consumer-visible effect (a CI-only tweak, a typo
+          in a comment), apply the '${SKIP_LABEL}' label to the pull request instead.
+          EOF
+            exit 1
+          fi
+
+          if [ -z "${VERSION:-}" ]; then
+            echo "${CHANGELOG_PATH} was updated."
+            exit 0
+          fi
+
+          # --- 2. and names this version ------------------------------------
+          # Dots escaped so they stay literal: unescaped, '1.2.3' also matches a
+          # heading for '1a2b3'. The trailing group keeps '0.0.21' from matching a
+          # heading for '0.0.210' or '0.0.21.1', while still allowing the date and
+          # link syntaxes people actually write:
+          #   ## 1.2.3        ## 1.2.3 - 2026-08-18        ## [1.2.3] - 2026-08-18
+          ESCAPED="${VERSION//./\\.}"
+          if ! grep -qE "^#{1,6}[[:space:]]+v?\[?${ESCAPED}\]?([^0-9.].*)?$" "$CHANGELOG_PATH"; then
+            cat >&2 <<EOF
+          ::error::${CHANGELOG_PATH} has no heading for version '${VERSION}'.
+
+          The file changed, but nothing in it is filed under the version this pull
+          request releases, so a consumer landing on tag '${VERSION}' has nothing
+          to read.
+
+          Add a heading like:
+
+              ## ${VERSION} - $(date -u +%Y-%m-%d)
+          EOF
+            exit 1
+          fi
+
+          echo "${CHANGELOG_PATH} was updated and carries a heading for ${VERSION}."

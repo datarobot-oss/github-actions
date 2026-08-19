@@ -1,0 +1,36 @@
+name: Changelog
+
+# This repo's own caller for the reusable check-changelog.yaml, and the
+# dogfooding of it. Every pull request must record what changed, because
+# consumers pin this repo by tag and the changelog is the only thing telling them
+# whether a bump is safe.
+#
+# Naive mode, no `version`: this repo's version is computed at release time by
+# create-release-on-merge.yaml, so while a pull request is open nobody yet knows
+# the number the entry will be filed under. Bullets go under "Unreleased" and get
+# a version heading when the release is cut.
+#
+# Lives in its own file rather than in self-test.yaml because it needs the
+# `labeled` trigger below, and self-test does not: keeping them separate stops a
+# label change from re-running actionlint, the unit tests, and the secret scan.
+
+on:
+  pull_request:
+    # `labeled` and `unlabeled` on top of the default types. Naming any type at
+    # all replaces the defaults, so the first three have to be repeated. Without
+    # `labeled` the failure message would be telling contributors to apply a
+    # label that cannot re-run the check, leaving it red until the next push.
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+jobs:
+  # NOTE: calling a reusable workflow renames the status check. This job used to
+  # live inline and reported as `Changelog updated`; it now reports as
+  # `Changelog / Changelog updated`, so branch protection has to be repointed.
+  changelog:
+    name: Changelog
+    uses: ./.github/workflows/check-changelog.yaml
+    permissions:
+      contents: read

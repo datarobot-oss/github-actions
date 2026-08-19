@@ -4,10 +4,25 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { loadWorkflow, runScript } from './helpers/workflow.mjs';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, dirname } from 'node:path';
+import { loadAction, loadWorkflow, runScript } from './helpers/workflow.mjs';
 import { runBash } from './helpers/bash.mjs';
 
 const sec = (iso) => Math.floor(Date.parse(iso) / 1000);
+
+/** A scratch directory with `files` ({ relativePath: contents }) written into it. */
+function sandbox(files = {}) {
+  const dir = mkdtempSync(join(tmpdir(), 'wf-files-'));
+  for (const [name, contents] of Object.entries(files)) {
+    const target = join(dir, name);
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, contents);
+  }
+  return dir;
+}
 
 // --------------------------------------------------------------------------
 // add-jira-link.yaml — "Extract Jira Ticket ID from PR title"
@@ -89,6 +104,77 @@ test('release: next-version normalizes leading zeros in major/minor', () => {
   // A malformed tag with leading zeros should still yield clean semver.
   assert.equal(nextVersion('1.08.2').outputs['new-version'], '1.8.3');
   assert.equal(nextVersion('1.2.007').outputs['new-version'], '1.2.8');
+});
+
+// --------------------------------------------------------------------------
+// create-release-on-merge.yaml — "Resolve the version to release"
+// The single place that decides what gets tagged, in both modes: the caller's
+// `version` input when it is set, otherwise the computed patch bump. Also the
+// only tag-collision check, which is what makes a no-bump merge a quiet no-op
+// instead of a red X on the default branch.
+// --------------------------------------------------------------------------
+function resolve({ supplied = '', computed = '', tags = '' } = {}) {
+  const script = runScript(loadWorkflow('create-release-on-merge'), { id: 'resolve' });
+  return runBash(script, {
+    env: { SUPPLIED_VERSION: supplied, COMPUTED_VERSION: computed, __GIT_TAGS: tags },
+  });
+}
+
+test('release resolve: auto mode releases the computed version', () => {
+  const r = resolve({ computed: '1.4.10', tags: '1.4.9' });
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(r.outputs.version, '1.4.10');
+  assert.equal(r.outputs.released, 'true');
+});
+
+test('release resolve: a supplied version is used verbatim', () => {
+  const r = resolve({ supplied: '2.0.0', tags: '1.9.9' });
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(r.outputs.version, '2.0.0');
+  assert.equal(r.outputs.released, 'true');
+});
+
+// The auto-mode steps are `if: inputs.version == ''` skipped when the caller
+// supplies a version, so COMPUTED_VERSION arrives empty. Pinned because a
+// regression here would silently release the wrong number rather than fail.
+test('release resolve: a supplied version wins over a computed one', () => {
+  assert.equal(resolve({ supplied: '3.1.4', computed: '1.0.1' }).outputs.version, '3.1.4');
+  assert.equal(resolve({ supplied: '3.1.4', computed: '' }).outputs.version, '3.1.4');
+});
+
+test('release resolve: an existing tag is a no-op, not a failure', () => {
+  const r = resolve({ supplied: '1.4.9', tags: ['1.4.8', '1.4.9'].join('\n') });
+  assert.equal(r.code, 0, 'a merge that did not bump must not red-X main');
+  assert.equal(r.outputs.released, 'false');
+  assert.equal(r.outputs.version, '1.4.9', 'the version is reported even when nothing was released');
+  assert.match(r.stdout, /::notice::Tag 1\.4\.9 already exists/);
+});
+
+test('release resolve: auto mode also skips a tag the semver scan missed', () => {
+  const r = resolve({ computed: '1.4.10', tags: '1.4.10' });
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(r.outputs.released, 'false');
+});
+
+test('release resolve: a v-prefixed tag is a different ref', () => {
+  // The scan strips a `v` to find the LATEST tag, but the ref this step is about
+  // to create is the bare string, so `v1.2.3` must not block `1.2.3`.
+  const r = resolve({ supplied: '1.2.3', tags: 'v1.2.3' });
+  assert.equal(r.outputs.released, 'true');
+});
+
+test('release resolve: a non-semver supplied version is rejected', () => {
+  for (const bad of ['1.2', 'v1.2.3', '1.2.3-rc1', 'main', '']) {
+    const r = resolve({ supplied: bad, computed: bad });
+    assert.equal(r.code, 1, `expected '${bad}' to be rejected`);
+    assert.match(r.stderr, /is not a plain X\.Y\.Z version/);
+  }
+});
+
+test('release resolve: a shell-injecting version is rejected, not executed', () => {
+  const r = resolve({ supplied: '1.2.3; touch /tmp/pwned' });
+  assert.equal(r.code, 1);
+  assert.match(r.stderr, /is not a plain X\.Y\.Z version/);
 });
 
 // --------------------------------------------------------------------------
@@ -492,4 +578,215 @@ test('notify-slack: build-pr-list survives an errored events response (no wait t
   const records = JSON.parse(r.exportedEnv.PR_RECORDS);
   assert.equal(records.length, 1);
   assert.equal(records[0].waiting, '', 'no labeled-at means no wait time, not a crash');
+});
+
+// --------------------------------------------------------------------------
+// check-changelog.yaml — "Check the changelog"
+// Naive mode asserts the file moved against the base branch. Versioned mode
+// also asserts it carries a heading naming the version being released.
+// --------------------------------------------------------------------------
+function checkChangelog({
+  diff = 'CHANGELOG.md',
+  files = {},
+  version = '',
+  baseRef = 'main',
+  path = 'CHANGELOG.md',
+  skipLabel = 'skip-changelog',
+} = {}) {
+  const script = runScript(loadWorkflow('check-changelog'), { id: 'check-changelog' });
+  return runBash(script, {
+    cwd: sandbox(files),
+    now: sec('2026-08-18T00:00:00Z'),
+    env: {
+      BASE_REF: baseRef,
+      CHANGELOG_PATH: path,
+      VERSION: version,
+      SKIP_LABEL: skipLabel,
+      __GIT_DIFF_FILES: diff,
+    },
+  });
+}
+
+test('changelog: an untouched changelog fails, naming the skip label', () => {
+  const r = checkChangelog({ diff: ['README.md', 'src/app.py'].join('\n') });
+  assert.equal(r.code, 1);
+  assert.match(r.stderr, /::error::CHANGELOG\.md was not updated/);
+  assert.match(r.stderr, /'skip-changelog' label/, 'tells the contributor the way out');
+});
+
+test('changelog: the skip label named in the message is the configured one', () => {
+  // The label is an input, so a consumer with their own label must not be told
+  // to apply ours.
+  const r = checkChangelog({ diff: 'README.md', skipLabel: 'no-changelog-needed' });
+  assert.match(r.stderr, /'no-changelog-needed' label/);
+});
+
+test('changelog: a touched changelog passes in naive mode', () => {
+  const r = checkChangelog({ diff: ['CHANGELOG.md', 'src/app.py'].join('\n') });
+  assert.equal(r.code, 0, r.stderr);
+});
+
+test('changelog: matches the path exactly, not as a substring', () => {
+  // `-x` on the grep: a diff touching docs/CHANGELOG.md.bak must not satisfy a
+  // check on CHANGELOG.md.
+  const r = checkChangelog({ diff: ['docs/CHANGELOG.md', 'CHANGELOG.md.bak'].join('\n') });
+  assert.equal(r.code, 1);
+});
+
+test('changelog: a custom changelog_path is honoured on both checks', () => {
+  const r = checkChangelog({
+    path: 'docs/CHANGES.md',
+    diff: 'docs/CHANGES.md',
+    version: '1.2.3',
+    files: { 'docs/CHANGES.md': '# Changes\n\n## 1.2.3 - 2026-08-18\n- did a thing\n' },
+  });
+  assert.equal(r.code, 0, r.stderr);
+});
+
+test('changelog: versioned mode requires a heading for that version', () => {
+  const files = { 'CHANGELOG.md': '# Changelog\n\n## 1.2.2 - 2026-08-01\n- older\n' };
+  const r = checkChangelog({ version: '1.2.3', files });
+  assert.equal(r.code, 1);
+  assert.match(r.stderr, /has no heading for version '1\.2\.3'/);
+  assert.match(r.stderr, /## 1\.2\.3 - 2026-08-18/, 'suggests a heading with today’s date');
+});
+
+test('changelog: versioned mode accepts the heading styles people actually write', () => {
+  const headings = [
+    '## 1.2.3',
+    '## 1.2.3 - 2026-08-18',
+    '## 1.2.3 (2026-08-18)',
+    '## [1.2.3] - 2026-08-18',
+    '## v1.2.3',
+    '### 1.2.3',
+    '##   1.2.3',
+  ];
+  for (const heading of headings) {
+    const r = checkChangelog({
+      version: '1.2.3',
+      files: { 'CHANGELOG.md': `# Changelog\n\n${heading}\n- did a thing\n` },
+    });
+    assert.equal(r.code, 0, `expected "${heading}" to match: ${r.stderr}`);
+  }
+});
+
+test('changelog: a heading for a longer version is not a match', () => {
+  // The trailing guard is what keeps 0.0.21 from being satisfied by an entry
+  // for 0.0.210 or 0.0.21.1 — both real shapes in a repo that ships often.
+  for (const heading of ['## 0.0.210', '## 0.0.21.1', '## 0.0.2']) {
+    const r = checkChangelog({
+      version: '0.0.21',
+      files: { 'CHANGELOG.md': `# Changelog\n\n${heading}\n- did a thing\n` },
+    });
+    assert.equal(r.code, 1, `expected "${heading}" not to satisfy 0.0.21`);
+  }
+});
+
+test('changelog: dots in the version stay literal', () => {
+  const r = checkChangelog({
+    version: '1.2.3',
+    files: { 'CHANGELOG.md': '# Changelog\n\n## 1x2x3 - 2026-08-18\n- did a thing\n' },
+  });
+  assert.equal(r.code, 1, 'an unescaped dot would make this a false pass');
+});
+
+test('changelog: a bare version mention in prose is not a heading', () => {
+  const r = checkChangelog({
+    version: '1.2.3',
+    files: { 'CHANGELOG.md': '# Changelog\n\nBumped to 1.2.3 in this release.\n' },
+  });
+  assert.equal(r.code, 1);
+});
+
+test('changelog: a non-pull_request event fails with an actionable message', () => {
+  // github.base_ref is empty outside a pull request, and the git range would
+  // otherwise blow up as "unknown revision" inside someone else's workflow.
+  const r = checkChangelog({ baseRef: '' });
+  assert.equal(r.code, 1);
+  assert.match(r.stderr, /called from a pull_request trigger/);
+});
+
+// --------------------------------------------------------------------------
+// actions/read-pyproject-version — "Read the version from pyproject.toml"
+// --------------------------------------------------------------------------
+// tomllib is stdlib from Python 3.11. CI runners have it; a machine still on an
+// older system python does not, and skipping beats a confusing local failure in
+// a repo that is otherwise Node-only.
+const hasTomllib = spawnSync('python3', ['-c', 'import tomllib'], { stdio: 'ignore' }).status === 0;
+const needsTomllib = hasTomllib ? {} : { skip: 'python3 on this machine has no tomllib (needs 3.11+)' };
+
+function readVersion({ files = {}, path = 'pyproject.toml', requireSemver = 'true' } = {}) {
+  const script = runScript(loadAction('read-pyproject-version'), { id: 'read' });
+  return runBash(script, {
+    cwd: sandbox(files),
+    env: { PYPROJECT_PATH: path, REQUIRE_SEMVER: requireSemver },
+  });
+}
+
+// The whole reason this uses tomllib rather than a grep: `version` appears three
+// times in this file and only one of them is the project's.
+const REALISTIC_PYPROJECT = `[build-system]
+requires = ["hatchling>=1.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "demo"
+version = "1.4.2"
+dependencies = ["requests>=2.31", "packaging==24.1"]
+
+[tool.poetry]
+version = "9.9.9"
+`;
+
+test('pyproject: reads [project].version, not the first version-looking line', needsTomllib, () => {
+  const r = readVersion({ files: { 'pyproject.toml': REALISTIC_PYPROJECT } });
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(r.outputs.version, '1.4.2');
+});
+
+test('pyproject: a custom path is read', needsTomllib, () => {
+  const r = readVersion({
+    path: 'packages/tool/pyproject.toml',
+    files: { 'packages/tool/pyproject.toml': '[project]\nversion = "0.1.0"\n' },
+  });
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(r.outputs.version, '0.1.0');
+});
+
+test('pyproject: a missing file points at the checkout, not at TOML', () => {
+  const r = readVersion();
+  assert.equal(r.code, 1);
+  assert.match(r.stderr, /has to run actions\/checkout/);
+});
+
+test('pyproject: a dynamic version says so instead of crashing', needsTomllib, () => {
+  const r = readVersion({
+    files: { 'pyproject.toml': '[project]\nname = "demo"\ndynamic = ["version"]\n' },
+  });
+  assert.equal(r.code, 1);
+  assert.match(r.stderr, /declares no \[project\] version/);
+  assert.match(r.stderr, /setuptools-scm/, 'names the likely cause');
+});
+
+test('pyproject: malformed TOML reports the parse error, not a traceback', needsTomllib, () => {
+  const r = readVersion({ files: { 'pyproject.toml': '[project\nversion = "1.0.0"\n' } });
+  assert.equal(r.code, 1);
+  assert.match(r.stderr, /is not valid TOML/);
+  assert.doesNotMatch(r.stderr, /Traceback/);
+});
+
+test('pyproject: a non-X.Y.Z version is rejected by default', needsTomllib, () => {
+  const r = readVersion({ files: { 'pyproject.toml': '[project]\nversion = "1.4.2rc1"\n' } });
+  assert.equal(r.code, 1);
+  assert.match(r.stderr, /is not a plain X\.Y\.Z version/);
+  assert.match(r.stderr, /require_semver/, 'names the input that relaxes it');
+});
+
+test('pyproject: require_semver=false passes a prerelease through', needsTomllib, () => {
+  const r = readVersion({
+    files: { 'pyproject.toml': '[project]\nversion = "1.4.2rc1"\n' },
+    requireSemver: 'false',
+  });
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(r.outputs.version, '1.4.2rc1');
 });

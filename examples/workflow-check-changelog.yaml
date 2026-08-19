@@ -1,0 +1,42 @@
+name: Changelog
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Check Changelog
+# Fails a pull request that did not update CHANGELOG.md. Waivable per pull
+# request with the `skip-changelog` label.
+# ─────────────────────────────────────────────────────────────────────────────
+# REQUIRED LABELS
+# - None. `skip-changelog` only has to exist once someone wants to use it, and
+#   `workflow-ensure-labels.yaml` does not create it.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Triggered by: every pull request. `labeled` and `unlabeled` are on the list
+# because naming any type replaces the defaults, and without them applying the
+# skip label could not re-run the check that told you to apply it.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+jobs:
+  # Require a changelog entry on every pull request.
+  changelog:
+    uses: datarobot-oss/github-actions/.github/workflows/check-changelog.yaml@0.0.22
+    permissions:
+      contents: read
+    # Every input below is optional and shown at its default. Delete the whole
+    # `with:` block to take the defaults.
+    with:
+      # Path to your changelog, if it is not CHANGELOG.md at the repo root.
+      changelog_path: CHANGELOG.md
+      # The label that waives the check.
+      skip_label: skip-changelog
+      # Waive the check for bot-authored pull requests (any login ending in
+      # `[bot]`). Dependabot cannot edit a changelog, so leaving this off means
+      # every dependency bump needs a label before it can merge.
+      skip_bot_authors: true
+      # Leave `version` unset for the naive check. See
+      # workflow-create-release-from-pyproject.yaml for the versioned variant,
+      # which also requires a heading naming the version being released.

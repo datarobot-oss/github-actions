@@ -1,7 +1,8 @@
-// Loads a reusable workflow YAML from .github/workflows and pulls the embedded
-// `run:` (bash) and `with.script:` (github-script JS) blocks back out, so the
-// tests exercise the EXACT code that ships in production. Nothing here mutates
-// the workflow files — they stay byte-for-byte what downstream repos consume.
+// Loads a reusable workflow YAML from .github/workflows, or a composite action
+// from actions/, and pulls the embedded `run:` (bash) and `with.script:`
+// (github-script JS) blocks back out, so the tests exercise the EXACT code that
+// ships in production. Nothing here mutates the files — they stay byte-for-byte
+// what downstream repos consume.
 
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -9,7 +10,9 @@ import { dirname, join } from 'node:path';
 import yaml from 'js-yaml';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const WORKFLOWS_DIR = join(HERE, '..', '..', '.github', 'workflows');
+const REPO_ROOT = join(HERE, '..', '..');
+const WORKFLOWS_DIR = join(REPO_ROOT, '.github', 'workflows');
+const ACTIONS_DIR = join(REPO_ROOT, 'actions');
 
 /** Parse a workflow file, e.g. loadWorkflow('backport'). */
 export function loadWorkflow(name) {
@@ -17,8 +20,19 @@ export function loadWorkflow(name) {
   return yaml.load(readFileSync(file, 'utf8'));
 }
 
-/** Flatten every step across every job into one array. */
+/** Parse a composite action, e.g. loadAction('read-pyproject-version'). */
+export function loadAction(name) {
+  const file = join(ACTIONS_DIR, name, 'action.yaml');
+  return yaml.load(readFileSync(file, 'utf8'));
+}
+
+/**
+ * Flatten every step into one array. A workflow keeps its steps under each job;
+ * a composite action keeps them under `runs.steps`, so both shapes feed the same
+ * findStep/runScript selectors.
+ */
 export function allSteps(workflow) {
+  if (Array.isArray(workflow.runs?.steps)) return workflow.runs.steps;
   return Object.values(workflow.jobs ?? {}).flatMap((job) => job.steps ?? []);
 }
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Portable `date` stub for the bash tests. Implements just what the workflows
-// use: `date -u +%s` (now) and `date -u -d <value> +%s` (parse a timestamp).
+// use: `date -u +%s` (now), `date -u -d <value> +%s` (parse a timestamp), and
+// the `%Y %m %d %H %M %S` specifiers a message template needs.
 // "now" is pinned via __NOW_EPOCH so waiting-time math is deterministic, and
 // `-d <iso>` works the same on macOS (BSD date) as on CI (GNU date).
 const args = process.argv.slice(2);
@@ -8,7 +9,8 @@ let parseValue = null;
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '-d' || args[i] === '--date') parseValue = args[++i];
 }
-const wantsEpoch = args.some((a) => a === '+%s');
+const format = args.find((a) => a.startsWith('+')) ?? null;
+const wantsEpoch = format === '+%s';
 
 let epoch;
 if (parseValue !== null) {
@@ -26,6 +28,21 @@ if (parseValue !== null) {
 
 if (wantsEpoch) {
   process.stdout.write(`${epoch}\n`);
+} else if (format) {
+  const d = new Date(epoch * 1000);
+  const pad = (n) => String(n).padStart(2, '0');
+  const specifiers = {
+    '%Y': String(d.getUTCFullYear()),
+    '%m': pad(d.getUTCMonth() + 1),
+    '%d': pad(d.getUTCDate()),
+    '%H': pad(d.getUTCHours()),
+    '%M': pad(d.getUTCMinutes()),
+    '%S': pad(d.getUTCSeconds()),
+    '%s': String(epoch),
+  };
+  process.stdout.write(
+    `${format.slice(1).replace(/%[A-Za-z]/g, (m) => specifiers[m] ?? m)}\n`,
+  );
 } else {
   process.stdout.write(`${new Date(epoch * 1000).toUTCString()}\n`);
 }
