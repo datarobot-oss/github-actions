@@ -15,6 +15,10 @@ than exhaustive.
 
 ## Unreleased
 
+## 0.0.25 - 2026-08-27
+- `create-release-on-merge.yaml` tags the built commit rather than the default branch's tip, so a
+  merge landing mid-release no longer leaves the tag on a commit nobody built.
+
 ## 0.0.23 - 2026-08-18
 - `create-release-on-merge.yaml` takes an optional `version` input. Left unset it behaves exactly as
   before: take the highest existing semver tag and bump its patch. Pass one and that exact string is
