@@ -156,6 +156,8 @@ jobs:
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           tag_name: ${{ steps.resolve.outputs.version }}
+          # The built commit, not the default branch tip the API would otherwise pick.
+          target_commitish: ${{ github.sha }}
           name: "${{ steps.resolve.outputs.version }}"
           generate_release_notes: true
           draft: false
