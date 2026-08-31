@@ -14,6 +14,10 @@ Entries below 0.0.19 were backfilled from the
 than exhaustive.
 
 ## Unreleased
+- `notify-slack.yaml` no longer duplicates a PR in the digest when it carries two labels that both
+  match "ready for review" (e.g. `Ready for review` and `00 - Ready for Review`). The filter's
+  `select(A and B)` treated `.labels[]?...` as a generator, so it re-emitted the PR once per matching
+  label instead of once per PR; the label check is now wrapped in `any(...)` to force a single boolean.
 
 ## 0.0.25 - 2026-08-27
 - `create-release-on-merge.yaml` tags the built commit rather than the default branch's tip, so a
