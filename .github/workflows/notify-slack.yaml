@@ -69,8 +69,13 @@ jobs:
           echo "$PRS_JSON" | jq -r '.[] | "Title: " + .title + " | Labels: " + ([.labels[].name] | join(", "))'
 
           # Filter PRS_JSON to only PRs with a label containing 'ready for review' (case-insensitive) and exclude those with "00 - Reviewed" label
+          # `.labels[]?` is a generator: inside select(A and B), it re-emits
+          # the PR once per label where A is truthy, so a PR with two labels
+          # both matching "ready for review" (e.g. "Ready for review" and
+          # "00 - Ready for Review") was duplicated in the digest. `any(...)`
+          # collapses that to a single boolean.
           PRS_JSON=$(echo "$PRS_JSON" | jq '[.[] | select(
-            (.labels[]?.name | ascii_downcase | test("ready for review")) and
+            (.labels | any(.name | ascii_downcase | test("ready for review"))) and
             (.labels | map(.name) | any(. == "00 - Reviewed") | not)
           )]')
           echo "Open PRs after filtering for 'ready for review' label (excluding '00 - Reviewed'):"
