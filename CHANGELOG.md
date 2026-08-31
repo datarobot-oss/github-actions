@@ -14,6 +14,8 @@ Entries below 0.0.19 were backfilled from the
 than exhaustive.
 
 ## Unreleased
+
+## 0.0.26 - 2026-08-31
 - `notify-slack.yaml` no longer duplicates a PR in the digest when it carries two labels that both
   match "ready for review" (e.g. `Ready for review` and `00 - Ready for Review`). The filter's
   `select(A and B)` treated `.labels[]?...` as a generator, so it re-emitted the PR once per matching
