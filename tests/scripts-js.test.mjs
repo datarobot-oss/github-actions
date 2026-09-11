@@ -726,6 +726,7 @@ const policy = (over = {}) =>
     settle_seconds: 0,
     max_changed_files: 0,
     merge_method: 'squash',
+    escalate_label: '00 - Ready for Review',
     ...over,
   });
 
@@ -1202,6 +1203,128 @@ test('automerge: a merge refused by GitHub is reported and does not abort the ru
 
   assert.equal(mergeCalls(github).length, 2, 'the second PR is still attempted');
   assert.match(commentBodies(github).join('\n'), /refused by GitHub: At least 1 approving review/);
+});
+
+// --- handover to a human ---------------------------------------------------
+// A red check never goes green on its own. Left alone, the PR sits wearing the
+// automerge label forever with nobody looking at it, which is worse than no
+// automation at all.
+const removeCalls = (github) => github.callsTo('rest.issues.removeLabel');
+const addCalls = (github) => github.callsTo('rest.issues.addLabels');
+
+test('automerge: a failing check hands the PR to a human', async () => {
+  const github = happyPath({
+    'rest.checks.listForRef': { data: [aCheck('Unit CI', 'failure')] },
+  });
+
+  await runAutomerge(github, { mode: 'merge' });
+
+  assert.equal(mergeCalls(github).length, 0);
+  assert.equal(removeCalls(github).length, 1, 'drops the opt-in label');
+  assert.equal(removeCalls(github)[0].params.name, 'automerge');
+  assert.equal(addCalls(github).length, 1, 'applies the review label');
+  assert.deepEqual(addCalls(github)[0].params.labels, ['00 - Ready for Review']);
+  assert.match(commentBodies(github).join('\n'), /Automerge stopped: check `Unit CI` did not pass/);
+});
+
+// Removing the opt-in label is what makes the handover idempotent: the PR is no
+// longer a candidate, so the next poll ignores it entirely.
+test('automerge: a PR already handed over is not escalated again', async () => {
+  const github = happyPath({
+    'rest.pulls.list': { data: [aPr({ labels: [{ name: '00 - Ready for Review' }] })] },
+    'rest.checks.listForRef': { data: [aCheck('Unit CI', 'failure')] },
+  });
+
+  await runAutomerge(github, { mode: 'merge' });
+
+  assert.equal(removeCalls(github).length, 0);
+  assert.equal(addCalls(github).length, 0);
+  assert.equal(commentBodies(github).length, 0, 'and no repeat comment');
+});
+
+// GitHub sends no notification when a comment is edited, and the whole point is
+// to get someone's attention, so the handover must post a NEW comment.
+test('automerge: the handover posts a new comment rather than editing the verdict', async () => {
+  const github = happyPath({
+    'rest.issues.listComments': {
+      data: [{ id: 99, user: { login: BOT }, body: '<!-- dr-auto-merge:verdict -->\nwaiting' }],
+    },
+    'rest.checks.listForRef': { data: [aCheck('Unit CI', 'failure')] },
+  });
+
+  await runAutomerge(github, { mode: 'merge' });
+
+  assert.equal(github.callsTo('rest.issues.createComment').length, 1, 'a new comment notifies');
+});
+
+test('automerge: report mode describes the handover but changes no labels', async () => {
+  const github = happyPath({
+    'rest.checks.listForRef': { data: [aCheck('Unit CI', 'failure')] },
+  });
+
+  await runAutomerge(github, { mode: 'report' });
+
+  assert.equal(removeCalls(github).length, 0, 'report mode writes no labels');
+  assert.equal(addCalls(github).length, 0);
+  assert.match(commentBodies(github).join('\n'), /would be handed to a human/);
+});
+
+test('automerge: with no escalate_label configured, labels are left alone', async () => {
+  const github = happyPath({
+    'rest.checks.listForRef': { data: [aCheck('Unit CI', 'failure')] },
+  });
+
+  await runAutomerge(github, { mode: 'merge', config: { escalate_label: '' } });
+
+  assert.equal(removeCalls(github).length, 0);
+  assert.equal(addCalls(github).length, 0);
+  assert.match(commentBodies(github).join('\n'), /no .?escalate_label.? is configured/);
+});
+
+test('automerge: a file outside allowed_paths is a handover, not an endless wait', async () => {
+  const github = happyPath({
+    'rest.pulls.listFiles': { data: [{ filename: 'src/app/main.py' }] },
+  });
+
+  await runAutomerge(github, { mode: 'merge', config: { allowed_paths: ['uv.lock'] } });
+
+  assert.equal(removeCalls(github).length, 1, 'this PR can never merge; a human must see it');
+  assert.match(commentBodies(github).join('\n'), /outside the allowed paths/);
+});
+
+// Transient states must NOT hand over: the next poll may well succeed, and
+// escalating a PR whose tests are merely still running would defeat the point.
+test('automerge: a still-running check waits rather than handing over', async () => {
+  const github = happyPath({
+    'rest.checks.listForRef': {
+      data: [aCheck('Unit CI', null, { status: 'in_progress', completed_at: null })],
+    },
+  });
+
+  await runAutomerge(github, { mode: 'merge' });
+
+  assert.equal(removeCalls(github).length, 0, 'still running is not terminal');
+  assert.match(commentBodies(github).join('\n'), /still running/);
+});
+
+test('automerge: an unreported check waits, since the workflow may not have started', async () => {
+  const github = happyPath({ 'rest.checks.listForRef': { data: [] } });
+
+  await runAutomerge(github, { mode: 'merge' });
+
+  assert.equal(removeCalls(github).length, 0, 'absent may just be late');
+});
+
+test('automerge: a failed label handover still comments and does not abort the run', async () => {
+  const github = happyPath({
+    'rest.pulls.list': { data: [aPr(), aPr({ number: 8 })] },
+    'rest.checks.listForRef': { data: [aCheck('Unit CI', 'failure')] },
+    'rest.issues.removeLabel': new Error('404 label not found'),
+  });
+
+  await runAutomerge(github, { mode: 'merge' });
+
+  assert.equal(github.callsTo('rest.issues.createComment').length, 2, 'both PRs still handled');
 });
 
 // --- comment hygiene -------------------------------------------------------

@@ -194,6 +194,47 @@ Cheapest first. Any failure is a no-op that is logged, never a red X on the PR.
 The merge is pinned to the head commit that was evaluated, so a push landing between evaluation
 and merge fails the merge instead of sailing through it unexamined.
 
+## When it gives up, it hands over
+
+Automerge refuses for two different kinds of reason, and it treats them differently.
+
+**Transient**, so it waits for the next poll: checks still running, an unreported check whose
+workflow may not have started, a settle window, a branch behind base, mergeability not yet
+computed.
+
+**Terminal**, so a person is needed: a check that completed and failed, a PR over
+`max_changed_files`, a file outside `allowed_paths`. None of these resolve on their own.
+
+On a terminal refusal, and only when `escalate_label` is set, the workflow:
+
+1. removes the `automerge` label,
+2. applies `escalate_label` (`00 - Ready for Review` in the example),
+3. posts a **new** comment saying what went wrong and what to do about it.
+
+The order matters. Removing the opt-in label first is what makes the handover happen exactly
+once: the PR immediately stops being a candidate, so the next poll passes over it.
+
+The comment is new rather than an edit of the running verdict because **GitHub sends no
+notification when a comment is edited**, and the entire point is to get someone's attention.
+
+There is a second, quieter benefit. The label is applied with the App token, and unlike
+`GITHUB_TOKEN`, App-token actions *do* trigger workflows. So applying `00 - Ready for Review`
+fires the existing `mark-pr-to-review.yaml` Slack ping with no extra wiring.
+
+In `report` mode the workflow says what it *would* do and changes no labels.
+
+The full loop this closes:
+
+```
+bot opens a dependency PR
+      -> checks run
+      -> automerge polls until everything has settled
+            -> all green  -> approve, then merge on a later poll
+            -> red        -> drop the label, tag a human, say why
+```
+
+Either way the PR reaches a resolution. It never just sits there.
+
 ## Turning it off
 
 Three independent levers, any one sufficient:
