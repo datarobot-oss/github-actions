@@ -26,6 +26,13 @@ jobs:
       - uses: docker://rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 # 1.7.12
         with:
           args: -color
+      # actionlint above shellchecks the `run:` blocks embedded in workflows, but
+      # it never sees a standalone .sh file. scripts/ is linted here or nowhere.
+      # Digest-pinned for the same reason, and duplicated in Taskfile.yml so
+      # `task lint` matches this job exactly; bump both together.
+      - uses: docker://koalaman/shellcheck@sha256:bb596a0d169b85ddd81d8b6d3a2ff6d5baf5fca10b97f575ebc647c3dff62b3d # stable
+        with:
+          args: scripts/install-automerge.sh
 
   unit-tests:
     name: Unit tests

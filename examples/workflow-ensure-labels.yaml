@@ -4,12 +4,18 @@ name: Ensure Labels
 # Ensure PR-automation labels
 # One-shot, idempotent label setup for the PR-automation & backport workflows.
 # Run from Actions → Run workflow. Optionally pass release branches to also make
-# backport label pairs, or enable cleanup of confusable review-label variants.
+# backport label pairs, Dependabot ecosystems to make ecosystem labels, or
+# enable cleanup of confusable review-label variants.
 # ─────────────────────────────────────────────────────────────────────────────
 # REQUIRED LABELS
 # - None — this workflow CREATES the labels the others require:
-#   `00 - Ready for Review`, `00 - Reviewed`, `backport-failed`, `do not merge`
-#   (+ `backport <branch>` / `backported <branch>` for any branches you pass).
+#   `00 - Ready for Review`, `00 - Reviewed`, `backport-failed`, `do not merge`,
+#   `automerge`, `dependencies` (+ `backport <branch>` / `backported <branch>`
+#   for any branches you pass, and one per Dependabot ecosystem you pass).
+#
+# RUN THIS BEFORE POINTING DEPENDABOT AT A LABEL. Dependabot silently drops a
+# `labels:` entry naming a label that does not exist in the repo — no warning,
+# no PR label, and anything keyed on that label never fires.
 # ─────────────────────────────────────────────────────────────────────────────
 
 # Triggered by: manual dispatch only (run from the Actions tab).
@@ -18,6 +24,11 @@ on:
     inputs:
       backport_branches:
         description: 'Backport branches, comma/space-separated (e.g. "release/X.Y, release/X.Z"). Leave blank to skip.'
+        required: false
+        default: ''
+        type: string
+      dependabot_ecosystems:
+        description: 'Dependabot ecosystems, comma/space-separated (e.g. "github-actions, pip"). Match your dependabot.yml labels. Leave blank to skip.'
         required: false
         default: ''
         type: string
@@ -34,6 +45,7 @@ jobs:
     uses: datarobot-oss/github-actions/.github/workflows/ensure-labels.yaml@0.0.20
     with:
       backport_branches: ${{ inputs.backport_branches }}
+      dependabot_ecosystems: ${{ inputs.dependabot_ecosystems }}
       delete_confusable: ${{ inputs.delete_confusable }}
     permissions:
       issues: write

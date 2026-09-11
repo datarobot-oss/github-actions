@@ -13,6 +13,9 @@ vars:
   # together; the trailing comments record the human-readable versions.
   ACTIONLINT_IMAGE: rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 # 1.7.12
   GITLEAKS_IMAGE: ghcr.io/gitleaks/gitleaks@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f # v8.30.1
+  # actionlint shellchecks the `run:` blocks inside workflows, but it never sees
+  # a standalone .sh file. scripts/ is linted separately or it is not linted.
+  SHELLCHECK_IMAGE: koalaman/shellcheck@sha256:bb596a0d169b85ddd81d8b6d3a2ff6d5baf5fca10b97f575ebc647c3dff62b3d # stable
   # pre-commit is a Python tool and this repo is otherwise Node-only, so it is not
   # a project dependency. Use whichever is available: a working pre-commit already
   # on PATH, otherwise run it through `uvx` (no persistent install needed).
@@ -75,6 +78,7 @@ tasks:
     desc: Lint all workflows (actionlint + shellcheck) via Docker, matching CI exactly
     cmds:
       - docker run --rm -v "$PWD:/repo" --workdir /repo {{.ACTIONLINT_IMAGE}} -color
+      - docker run --rm -v "$PWD:/repo" --workdir /repo {{.SHELLCHECK_IMAGE}} scripts/*.sh
 
   secret-scan:
     desc: Scan the working tree for secrets (gitleaks) via Docker, matching CI exactly
