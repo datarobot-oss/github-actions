@@ -15,6 +15,9 @@ than exhaustive.
 
 ## Unreleased
 
+## 0.0.28 - 2026-09-11
+- Fix `automerge` to handle dependabot naming
+
 ## 0.0.27 - 2026-09-11
 - Add `automerge` functionality
 

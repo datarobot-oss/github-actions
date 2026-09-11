@@ -739,10 +739,16 @@ const aPr = (over = {}) => ({
   ...over,
 });
 
-const botCommit = (sha = 'c0ffee1') => ({
+// Shaped like a REAL Dependabot commit, verified against
+// af-component-evaluation PR #64: GitHub creates the commit through the API, so
+// the author is the bot but the committer is `web-flow`, GitHub's own signing
+// identity, with a valid signature.
+const botCommit = (sha = 'c0ffee1', over = {}) => ({
   sha,
   author: { login: 'dependabot[bot]' },
-  committer: { login: 'dependabot[bot]' },
+  committer: { login: 'web-flow' },
+  commit: { verification: { verified: true, reason: 'valid' } },
+  ...over,
 });
 
 // Old enough that a zero settle window is satisfied without faking the clock.
@@ -841,6 +847,50 @@ test('automerge: a human commit on a bot branch blocks the merge', async () => {
   assert.equal(mergeCalls(github).length, 0, 'must not merge a human commit');
   assert.equal(approveCalls(github).length, 0, 'must not approve it either');
   assert.match(commentBodies(github).join('\n'), /bbbbbbb.*not an allow-listed bot/s);
+});
+
+// Regression, found on the first live run against af-component-evaluation PR #64.
+// Requiring the committer to be an allow-listed bot rejected every genuine
+// Dependabot PR, because GitHub commits them as `web-flow`.
+test('automerge: a real Dependabot commit (committed by web-flow) is accepted', async () => {
+  const github = happyPath({
+    'rest.pulls.listCommits': { data: [botCommit('7e1a7f5')] },
+    'rest.pulls.listReviews': { data: [{ state: 'APPROVED', user: { login: BOT } }] },
+  });
+
+  await runAutomerge(github);
+
+  assert.equal(mergeCalls(github).length, 1, 'web-flow is how every real bot commit looks');
+});
+
+// The committer check exists to close author spoofing: GitHub links
+// `author.login` by email alone, so a human can claim to be Dependabot. Setting
+// committer.email to noreply@github.com resolves the committer to web-flow too,
+// so the SIGNATURE is the only thing that actually distinguishes them.
+test('automerge: a web-flow committer without a verified signature is refused', async () => {
+  const github = happyPath({
+    'rest.pulls.listCommits': {
+      data: [botCommit('5p00fed', { commit: { verification: { verified: false, reason: 'unsigned' } } })],
+    },
+  });
+
+  await runAutomerge(github);
+
+  assert.equal(mergeCalls(github).length, 0, 'an unsigned web-flow commit is spoofable');
+  assert.match(commentBodies(github).join('\n'), /signature is not verified/);
+});
+
+test('automerge: a spoofed author is caught even when the signature is valid', async () => {
+  const github = happyPath({
+    'rest.pulls.listCommits': {
+      data: [botCommit('deadbad', { author: { login: 'mjnitz02' } })],
+    },
+  });
+
+  await runAutomerge(github);
+
+  assert.equal(mergeCalls(github).length, 0);
+  assert.match(commentBodies(github).join('\n'), /authored by `mjnitz02`/);
 });
 
 test('automerge: a commit with no linked GitHub account blocks the merge', async () => {

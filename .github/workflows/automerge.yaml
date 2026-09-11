@@ -410,11 +410,43 @@ jobs:
                 // an allow-listed bot, so it is refused.
                 const authorLogin = commit.author?.login;
                 const committerLogin = commit.committer?.login;
-                if (!cfg.allowedAuthors.has(authorLogin) || !cfg.allowedAuthors.has(committerLogin)) {
+                const short = commit.sha.slice(0, 7);
+
+                // The author is the load-bearing check: a human pushing to a bot
+                // branch shows up here whether they push over git or through the
+                // web UI.
+                if (!cfg.allowedAuthors.has(authorLogin)) {
                   return refuse(
-                    `commit \`${commit.sha.slice(0, 7)}\` is authored by ` +
-                    `\`${authorLogin || 'unknown'}\`/\`${committerLogin || 'unknown'}\`, ` +
+                    `commit \`${short}\` is authored by \`${authorLogin || 'unknown'}\`, ` +
                     'not an allow-listed bot',
+                  );
+                }
+
+                // The committer check exists to close author spoofing: git lets
+                // anyone set an author, and GitHub links `author.login` purely by
+                // email, so a human CAN push a commit that claims to be from
+                // dependabot.
+                //
+                // But a genuine Dependabot commit is NOT committed by Dependabot.
+                // GitHub creates it through the API and attributes the committer
+                // to `web-flow`, its own signing identity. Requiring the committer
+                // to be an allow-listed bot therefore rejects every real
+                // Dependabot PR, which is what happened on the first live run.
+                //
+                // So web-flow is accepted, but ONLY with a verified signature.
+                // Setting `committer.email` to noreply@github.com locally is
+                // enough to make the committer resolve to web-flow; producing
+                // GitHub's signature over that commit is not something an
+                // attacker can do, so the signature is what makes this safe.
+                const verified = commit.commit?.verification?.verified === true;
+                const committerOk = cfg.allowedAuthors.has(committerLogin)
+                  || (committerLogin === 'web-flow' && verified);
+                if (!committerOk) {
+                  return refuse(
+                    `commit \`${short}\` is committed by \`${committerLogin || 'unknown'}\`` +
+                    (committerLogin === 'web-flow'
+                      ? ', whose signature is not verified'
+                      : ', not an allow-listed bot'),
                   );
                 }
               }
