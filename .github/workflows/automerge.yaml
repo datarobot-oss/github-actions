@@ -23,6 +23,14 @@ name: Automerge bot PRs
 # are read from the rules API and unioned with `expected_checks`, never
 # duplicated into config where they could drift.
 #
+# WHEN IT GIVES UP, IT HANDS OVER RATHER THAN GOING QUIET.
+# A red check, or a PR outside the policy's file limits, never resolves on its
+# own. Left alone such a PR sits wearing the opt-in label forever with nobody
+# looking at it, which is worse than no automation at all. So on a TERMINAL
+# refusal the workflow removes the opt-in label, applies `escalate_label`, and
+# posts a new comment saying why. Removing the opt-in label is also what makes
+# the handover happen exactly once: the PR stops being a candidate.
+#
 # IT RUNS ON A SCHEDULE, NEVER ON `pull_request`. Three reasons:
 #   1. A Dependabot `pull_request` event reads Dependabot secrets only, never
 #      the repo's Actions secrets, so the App private key would arrive empty.
@@ -242,6 +250,10 @@ jobs:
                 // behaviour, not the permissive one.
                 blockOnAnyFailure: raw.block_on_any_failure !== false,
                 mergeMethod: raw.merge_method === undefined ? 'squash' : String(raw.merge_method),
+                // Empty disables escalation entirely, which is the default: the
+                // label has to exist in the repo, and not every consumer runs
+                // the review-label workflows this pairs with.
+                escalateLabel: raw.escalate_label === undefined ? '' : String(raw.escalate_label),
                 botLogin: `${process.env.APP_SLUG}[bot]`,
               };
             } catch (err) {
@@ -385,7 +397,15 @@ jobs:
             // an unrelated human PR costs one label comparison.
             const evaluate = async (pr) => {
               const no = (reason) => ({ eligible: false, reason, candidate: false });
+              // `refuse` is transient: the next poll may well succeed, so the PR
+              // is left alone to settle, finish its checks, or be rebased.
               const refuse = (reason) => ({ eligible: false, reason, candidate: true });
+              // `escalate` is TERMINAL: nothing that happens without a human
+              // changes this answer. A red check does not go green on its own,
+              // and a PR touching files outside the policy never will. Left
+              // alone, those PRs sit labelled forever with nobody looking at
+              // them, which is the exact rot this is meant to prevent.
+              const escalate = (reason) => ({ eligible: false, reason, candidate: true, terminal: true });
 
               if (!(pr.labels || []).some((l) => l.name === cfg.label)) {
                 return no(`no \`${cfg.label}\` label`);
@@ -410,11 +430,43 @@ jobs:
                 // an allow-listed bot, so it is refused.
                 const authorLogin = commit.author?.login;
                 const committerLogin = commit.committer?.login;
-                if (!cfg.allowedAuthors.has(authorLogin) || !cfg.allowedAuthors.has(committerLogin)) {
+                const short = commit.sha.slice(0, 7);
+
+                // The author is the load-bearing check: a human pushing to a bot
+                // branch shows up here whether they push over git or through the
+                // web UI.
+                if (!cfg.allowedAuthors.has(authorLogin)) {
                   return refuse(
-                    `commit \`${commit.sha.slice(0, 7)}\` is authored by ` +
-                    `\`${authorLogin || 'unknown'}\`/\`${committerLogin || 'unknown'}\`, ` +
+                    `commit \`${short}\` is authored by \`${authorLogin || 'unknown'}\`, ` +
                     'not an allow-listed bot',
+                  );
+                }
+
+                // The committer check exists to close author spoofing: git lets
+                // anyone set an author, and GitHub links `author.login` purely by
+                // email, so a human CAN push a commit that claims to be from
+                // dependabot.
+                //
+                // But a genuine Dependabot commit is NOT committed by Dependabot.
+                // GitHub creates it through the API and attributes the committer
+                // to `web-flow`, its own signing identity. Requiring the committer
+                // to be an allow-listed bot therefore rejects every real
+                // Dependabot PR, which is what happened on the first live run.
+                //
+                // So web-flow is accepted, but ONLY with a verified signature.
+                // Setting `committer.email` to noreply@github.com locally is
+                // enough to make the committer resolve to web-flow; producing
+                // GitHub's signature over that commit is not something an
+                // attacker can do, so the signature is what makes this safe.
+                const verified = commit.commit?.verification?.verified === true;
+                const committerOk = cfg.allowedAuthors.has(committerLogin)
+                  || (committerLogin === 'web-flow' && verified);
+                if (!committerOk) {
+                  return refuse(
+                    `commit \`${short}\` is committed by \`${committerLogin || 'unknown'}\`` +
+                    (committerLogin === 'web-flow'
+                      ? ', whose signature is not verified'
+                      : ', not an allow-listed bot'),
                   );
                 }
               }
@@ -444,7 +496,7 @@ jobs:
                 const check = checks.get(name);
                 if (!check) return refuse(`expected check \`${name}\` has not reported`);
                 if (check.state === 'pending') return refuse(`check \`${name}\` is still running`);
-                if (check.state !== 'success') return refuse(`check \`${name}\` did not pass`);
+                if (check.state !== 'success') return escalate(`check \`${name}\` did not pass`);
               }
 
               const pending = [...checks.values()].filter((c) => c.state === 'pending');
@@ -454,7 +506,7 @@ jobs:
               if (cfg.blockOnAnyFailure) {
                 const failed = [...checks.values()].filter((c) => c.state === 'failure');
                 if (failed.length > 0) {
-                  return refuse(`check \`${failed[0].name}\` is failing`);
+                  return escalate(`check \`${failed[0].name}\` is failing`);
                 }
               }
 
@@ -484,7 +536,7 @@ jobs:
                 return refuse('branch is behind base and the ruleset requires it to be up to date');
               }
               if (cfg.maxChangedFiles > 0 && detail.changed_files > cfg.maxChangedFiles) {
-                return refuse(`touches ${detail.changed_files} files, over the limit of ${cfg.maxChangedFiles}`);
+                return escalate(`it touches ${detail.changed_files} files, over the limit of ${cfg.maxChangedFiles}`);
               }
 
               if (pathMatchers.length > 0) {
@@ -493,7 +545,7 @@ jobs:
                 });
                 for (const file of files) {
                   if (!pathMatchers.some((re) => re.test(file.filename))) {
-                    return refuse(`\`${file.filename}\` is outside the allowed paths`);
+                    return escalate(`\`${file.filename}\` is outside the allowed paths`);
                   }
                 }
               }
@@ -549,6 +601,66 @@ jobs:
               // A PR that is not a candidate is some human's ordinary work.
               // It gets a line in the job summary and nothing on the PR itself.
               if (!verdict.candidate) continue;
+
+              if (!verdict.eligible && verdict.terminal) {
+                if (!cfg.escalateLabel) {
+                  await upsertComment(
+                    pr.number,
+                    `Not merging: ${verdict.reason}. This needs a human, but no ` +
+                    '`escalate_label` is configured, so the PR is left as it is.',
+                  );
+                  rows[rows.length - 1][1] = 'needs a human';
+                  continue;
+                }
+                if (cfg.mode === 'report') {
+                  await upsertComment(
+                    pr.number,
+                    `Not merging: ${verdict.reason}. In \`report\` mode, so the ` +
+                    `\`${cfg.label}\` label was left in place; outside report mode this PR ` +
+                    `would be handed to a human via \`${cfg.escalateLabel}\`.`,
+                  );
+                  rows[rows.length - 1][1] = 'would escalate';
+                  continue;
+                }
+
+                try {
+                  // Drop the opt-in label FIRST. It is what makes this PR a
+                  // candidate, so once it is gone the PR cannot be re-escalated
+                  // on the next poll, and the handover happens exactly once.
+                  await github.rest.issues.removeLabel({
+                    owner, repo, issue_number: pr.number, name: cfg.label,
+                  });
+                  await github.rest.issues.addLabels({
+                    owner, repo, issue_number: pr.number, labels: [cfg.escalateLabel],
+                  });
+                } catch (err) {
+                  // Report and move to the next PR rather than failing the run.
+                  // A half-finished handover still gets a comment below, which
+                  // is the part a human actually reads.
+                  core.warning(`Label handover failed on #${pr.number}: ${err.message}`);
+                  rows[rows.length - 1][2] = `label handover failed: ${err.message}`;
+                }
+                // A NEW comment, deliberately, not an edit of the running
+                // verdict. GitHub sends no notification when a comment is
+                // edited, and the entire point here is to get a person's
+                // attention.
+                await github.rest.issues.createComment({
+                  owner,
+                  repo,
+                  issue_number: pr.number,
+                  body: [
+                    `**Automerge stopped: ${verdict.reason}.**`,
+                    '',
+                    `I removed the \`${cfg.label}\` label and applied \`${cfg.escalateLabel}\`, ` +
+                    'so this lands in the review queue instead of sitting here unattended.',
+                    '',
+                    'Nothing here resolves on its own, so it needs someone to look. If the ' +
+                    `problem is fixed and you want it picked up again, re-apply \`${cfg.label}\`.`,
+                  ].join('\n'),
+                });
+                rows[rows.length - 1][1] = 'escalated';
+                continue;
+              }
 
               if (!verdict.eligible) {
                 await upsertComment(pr.number, `Not merging yet: ${verdict.reason}.`);
