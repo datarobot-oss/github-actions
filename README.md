@@ -89,15 +89,26 @@ To upgrade later, bump the `@0.0.20` ref in the `uses:` lines to a newer
 | [`workflow-create-release-from-pyproject.yaml`](examples/workflow-create-release-from-pyproject.yaml) | Tags the version `pyproject.toml` declares and cuts a GitHub release. No-ops when the version was not bumped | push to `main` | none |
 | [`workflow-check-changelog.yaml`](examples/workflow-check-changelog.yaml) | Fails a PR that did not update `CHANGELOG.md`. Waivable with a label | pull request | none |
 | [`workflow-check-changelog-versioned.yaml`](examples/workflow-check-changelog-versioned.yaml) | The same, but also requires a heading for the version `pyproject.toml` declares | pull request | none |
+| [`workflow-automerge.yaml`](examples/workflow-automerge.yaml) | Approves and merges PRs opened by an allow-listed bot, once every check the repo expects has reported green. Policy lives in `.github/automerge.yaml` | 10-minute cron; manual | `DR_AUTO_MERGE_PRIVATE_KEY` |
 
 The last three are the release story, and [docs/RELEASE.md](docs/RELEASE.md) explains which pair to
 pick: it comes down to whether a version string already exists inside your repo, or lives only in
 your git tags.
 
+`workflow-automerge.yaml` is the one workflow here that can change your repository without a
+human in the loop, so it is deliberately harder to switch on than the rest: it needs a GitHub App,
+a ruleset split, and a policy file, and it starts in a mode that merges nothing. Read
+[docs/AUTOMERGE.md](docs/AUTOMERGE.md) before adopting it.
+
 The PR-automation and backport workflows depend on labels that
 [`workflow-ensure-labels.yaml`](examples/workflow-ensure-labels.yaml) creates. A missing label
 hard-fails the job on purpose, so a setup problem shows up as a red X rather than silently doing
 nothing.
+
+Run it before pointing Dependabot at a label, too. **Dependabot silently drops a `labels:` entry
+naming a label that does not exist in the repo** — no warning, no label on the PR, and anything
+keyed on that label never fires. That failure is invisible from both ends, which is why
+`automerge` and `dependencies` are always created and per-ecosystem labels are an input.
 
 # Available actions
 
@@ -150,6 +161,7 @@ not declare: passing an undeclared input to a reusable workflow is a hard error,
 |---|---|---|
 | `SLACK_WEBHOOK_URL` | `workflow-pr-automation.yaml` | Incoming-webhook URL for the channel that receives PR notifications. Without it the Slack steps skip rather than fail. |
 | `BACKPORT_APP_ID` | `workflow-backport.yaml` | Optional. GitHub App ID. |
+| `DR_AUTO_MERGE_PRIVATE_KEY` | `workflow-automerge.yaml` | The merge App's private key, whole PEM including the BEGIN/END lines. The matching app id is a plain input, not a secret. See [docs/AUTOMERGE.md](docs/AUTOMERGE.md). |
 | `BACKPORT_APP_PRIVATE_KEY` | `workflow-backport.yaml` | Optional. The App's private key. Together with `BACKPORT_APP_ID` this makes CI run automatically on backport PRs; without them the workflow falls back to `GITHUB_TOKEN` and CI must be kicked by hand. See [docs/BACKPORT.md](docs/BACKPORT.md). |
 
 # Documentation
@@ -158,6 +170,10 @@ not declare: passing an undeclared input to a reusable workflow is a hard error,
   version reader ties them together. Read it before picking a release workflow.
 - [docs/BACKPORT.md](docs/BACKPORT.md) covers the backport flow in depth: label conventions, the
   manual dispatch path, conflict handling, and the one-time GitHub App setup.
+- [docs/AUTOMERGE.md](docs/AUTOMERGE.md) covers the automerge workflow: the GitHub App and its
+  permissions, the ruleset split that makes bypass safe, why `expected_checks` catches what
+  native auto-merge cannot, and the report-then-approve-then-merge rollout. Read it before
+  enabling automerge anywhere.
 - [docs/TESTING.md](docs/TESTING.md) covers how the workflows are tested and how to add tests for a
   new one.
 

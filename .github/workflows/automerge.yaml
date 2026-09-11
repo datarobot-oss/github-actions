@@ -1,0 +1,612 @@
+name: Automerge bot PRs
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Approves and merges pull requests opened by an allow-listed bot, once every
+# check the repo EXPECTS has actually reported success.
+#
+# WHY NOT GITHUB'S NATIVE AUTO-MERGE
+# Native auto-merge waits only on REQUIRED checks. Required checks have to stay
+# a small set, because a required context that a PR legitimately never fires
+# leaves that PR pending forever, so a repo cannot simply require everything.
+# That leaves a gap: a bot PR can satisfy every REQUIRED check while a suite you
+# very much wanted to see never ran at all. `.github/automerge.yaml` closes it.
+# Its `expected_checks` list is enforced by this workflow for bot PRs only, so
+# it can be far stricter than anything the repo could make mandatory for every
+# PR without wedging half of them.
+#
+# THE RULESET IS STILL THE FLOOR; THIS WORKFLOW ONLY ADDS TO IT.
+# Meant to run against a branch governed by two STACKED rulesets:
+#   - one carrying `required_status_checks` with an EMPTY bypass list
+#   - one carrying `pull_request` (the review rule) with the merge App bypassed
+# So a bug in the eligibility logic below still cannot merge a PR that fails a
+# required check: GitHub refuses the merge server-side. The required contexts
+# are read from the rules API and unioned with `expected_checks`, never
+# duplicated into config where they could drift.
+#
+# IT RUNS ON A SCHEDULE, NEVER ON `pull_request`. Three reasons:
+#   1. A Dependabot `pull_request` event reads Dependabot secrets only, never
+#      the repo's Actions secrets, so the App private key would arrive empty.
+#   2. GitHub intermittently fails to dispatch workflow runs at all. A fire-once
+#      bot silently skips those PRs forever; a poller self-heals.
+#   3. "Wait for the checks to finish" falls out for free, with no sleep loop
+#      burning runner minutes and no job timeout to lose the PR to.
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  workflow_call:
+    inputs:
+      app_id:
+        description: >-
+          Numeric app id of the GitHub App that approves and merges. Not a
+          secret (it is public metadata), so it is an input rather than a
+          secret. The App must be installed on this repo, and for the merge to
+          clear the review rule it must also be a `bypass_actors` entry on the
+          ruleset carrying that rule.
+        required: true
+        type: string
+      mode:
+        description: >-
+          `report` evaluates every PR and comments its verdict, approving and
+          merging nothing. `approve` also approves. `merge` also merges.
+          Defaults to `report`, so a caller that forgets to set it cannot merge
+          anything. Maps to the rollout phases: report, then approve, then
+          merge. This is operational rather than policy, which is why it lives
+          in the caller and not in the config file.
+        required: false
+        default: 'report'
+        type: string
+      config_path:
+        description: 'Path to the automerge policy file, relative to the repo root.'
+        required: false
+        default: '.github/automerge.yaml'
+        type: string
+    secrets:
+      app_private_key:
+        description: >-
+          PEM private key for the App named by `app_id`, whole file including
+          the BEGIN/END lines.
+        required: true
+
+jobs:
+  automerge:
+    runs-on: ubuntu-latest
+    permissions:
+      # Only so `actions/checkout` can read the policy file. Every WRITE below
+      # is made with the App installation token, not GITHUB_TOKEN —
+      # deliberately, because ruleset bypass resolves against whoever PERFORMS
+      # the merge, and GITHUB_TOKEN acts as `github-actions[bot]`, which holds
+      # no bypass and cannot be given one (bypass actors must be Apps installed
+      # on the repo, and Actions is built in rather than installed).
+      contents: read
+
+    steps:
+      # A scheduled run always checks out the default branch, so the policy can
+      # never be read from a PR head. That matters: a PR that could supply its
+      # own automerge policy could grant itself permission to be merged.
+      - name: Check out the default branch
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Read the automerge policy
+        id: config
+        env:
+          # Via env rather than `${{ }}` interpolated into the script body: an
+          # input is caller-controlled and would otherwise be expanded into bash
+          # source before bash ever parses the line.
+          CONFIG_PATH: ${{ inputs.config_path }}
+        run: |
+          if [ ! -f "$CONFIG_PATH" ]; then
+            echo "::error::No automerge policy at '$CONFIG_PATH'. The policy file is what enrols a repo; add it, or remove this workflow." >&2
+            exit 1
+          fi
+
+          if ! command -v python3 >/dev/null 2>&1; then
+            echo "::error::python3 is not on PATH. Add actions/setup-python before this step, or use a runner image that ships Python 3." >&2
+            exit 1
+          fi
+
+          # PyYAML is not in the standard library, unlike the tomllib used by
+          # actions/read-pyproject-version. It IS present on the GitHub-hosted
+          # Ubuntu images, so this install is a fallback for self-hosted runners
+          # rather than the normal path. `|| true` because pip's own failure
+          # output (a PEP 668 externally-managed environment, say) is noise next
+          # to the actionable message below, and `set -e` would abort before it.
+          if ! python3 -c 'import yaml' >/dev/null 2>&1; then
+            echo "PyYAML is not installed; trying to install it."
+            python3 -m pip install --quiet --disable-pip-version-check pyyaml >/dev/null 2>&1 || true
+          fi
+          if ! python3 -c 'import yaml' >/dev/null 2>&1; then
+            echo "::error::Reading the automerge policy needs PyYAML, which is not installed and could not be installed automatically. Add a step that installs it before this one." >&2
+            exit 1
+          fi
+
+          CONFIG_JSON="$(python3 - "$CONFIG_PATH" <<'PY'
+          import json
+          import sys
+
+          import yaml
+
+          path = sys.argv[1]
+          try:
+              with open(path, encoding="utf-8") as fh:
+                  data = yaml.safe_load(fh)
+          except yaml.YAMLError as exc:
+              sys.exit("::error::%s is not valid YAML: %s" % (path, exc))
+
+          if not isinstance(data, dict):
+              sys.exit("::error::%s must be a YAML mapping at the top level." % path)
+
+          # Normalising here rather than in JS keeps the JS side free of type
+          # guards: a single string is promoted to a one-item list, so both
+          # `allowed_paths: uv.lock` and the list form behave the same.
+          def as_list(value):
+              if value is None:
+                  return []
+              if isinstance(value, str):
+                  return [value]
+              if isinstance(value, list):
+                  return [str(item) for item in value]
+              sys.exit("::error::expected a string or a list, got %r" % (value,))
+
+          for key in ("allowed_authors", "expected_checks", "allowed_paths"):
+              data[key] = as_list(data.get(key))
+
+          # One line, because $GITHUB_ENV heredocs are delimited by line and a
+          # pretty-printed body would need the delimiter to be unguessable.
+          json.dump(data, sys.stdout, separators=(",", ":"))
+          PY
+          )"
+
+          # Multiline data crosses steps through $GITHUB_ENV, never a step
+          # output: an output is re-expanded by the expression engine, so an
+          # expression delimiter appearing inside a config value would be
+          # evaluated rather than read.
+          {
+            echo 'AUTOMERGE_CONFIG<<__AUTOMERGE_EOF__'
+            echo "$CONFIG_JSON"
+            echo '__AUTOMERGE_EOF__'
+          } >> "$GITHUB_ENV"
+
+          echo "Loaded policy from $CONFIG_PATH"
+
+      - name: Mint an App installation token
+        id: app-token
+        uses: actions/create-github-app-token@a8d616148505b5069dccd32f177bb87d7f39123b # v2.1.4
+        with:
+          app-id: ${{ inputs.app_id }}
+          private-key: ${{ secrets.app_private_key }}
+
+      - name: Evaluate and act on open PRs
+        id: evaluate
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+        env:
+          MODE: ${{ inputs.mode }}
+          # AUTOMERGE_CONFIG is already in the environment, set by the step above.
+          #
+          # `create-github-app-token` reports the App's slug, from which the bot
+          # login is derived. Used to recognise this bot's OWN approval and its
+          # own verdict comment, so repeated ticks update rather than duplicate.
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const MARKER = '<!-- dr-auto-merge:verdict -->';
+
+            // A check that finished in any of these states blocks the merge.
+            // `skipped` and `neutral` are deliberately absent: an always-
+            // reporting gate job over a path-filtered suite reports `skipped`
+            // when the suite correctly did not apply, and treating that as a
+            // failure would jam every PR in a repo using the gate pattern.
+            const FAILED_CONCLUSIONS = new Set([
+              'failure', 'timed_out', 'cancelled', 'action_required', 'stale',
+            ]);
+            const PASSED_CONCLUSIONS = new Set(['success', 'skipped', 'neutral']);
+
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            // ---------------------------------------------------------------
+            // Config
+            // ---------------------------------------------------------------
+            let raw;
+            try {
+              raw = JSON.parse(process.env.AUTOMERGE_CONFIG);
+            } catch (err) {
+              core.setFailed(`Could not parse the automerge policy: ${err.message}`);
+              return;
+            }
+
+            const readInt = (name, value, fallback) => {
+              if (value === undefined || value === null || value === '') return fallback;
+              // Number() rather than parseInt() so "5 bananas" is rejected as
+              // NaN instead of silently becoming 5.
+              const n = Number(value);
+              if (!Number.isInteger(n) || n < 0) {
+                throw new Error(`Invalid ${name}: ${JSON.stringify(value)}`);
+              }
+              return n;
+            };
+
+            let cfg;
+            try {
+              cfg = {
+                mode: process.env.MODE,
+                allowedAuthors: new Set(raw.allowed_authors),
+                label: raw.label === undefined ? 'automerge' : String(raw.label),
+                expectedChecks: raw.expected_checks,
+                allowedPaths: raw.allowed_paths,
+                settleSeconds: readInt('settle_seconds', raw.settle_seconds, 300),
+                maxChangedFiles: readInt('max_changed_files', raw.max_changed_files, 0),
+                // Defaults ON. A policy that forgets the key gets the strict
+                // behaviour, not the permissive one.
+                blockOnAnyFailure: raw.block_on_any_failure !== false,
+                mergeMethod: raw.merge_method === undefined ? 'squash' : String(raw.merge_method),
+                botLogin: `${process.env.APP_SLUG}[bot]`,
+              };
+            } catch (err) {
+              core.setFailed(err.message);
+              return;
+            }
+
+            if (!['report', 'approve', 'merge'].includes(cfg.mode)) {
+              core.setFailed(`Invalid mode: ${JSON.stringify(cfg.mode)}. Expected report, approve, or merge.`);
+              return;
+            }
+            if (!['merge', 'squash', 'rebase'].includes(cfg.mergeMethod)) {
+              core.setFailed(`Invalid merge_method: ${JSON.stringify(cfg.mergeMethod)}.`);
+              return;
+            }
+            if (cfg.allowedAuthors.size === 0) {
+              core.setFailed('allowed_authors is empty; refusing to run with no author allow-list.');
+              return;
+            }
+            if (!cfg.label) {
+              core.setFailed('label is empty; refusing to run with no opt-in label.');
+              return;
+            }
+
+            // ---------------------------------------------------------------
+            // Helpers
+            // ---------------------------------------------------------------
+
+            // Translate a path glob to a regex. Supports `**` (any depth, the
+            // only token allowed to cross `/`), `*`, and `?`. Everything else is
+            // escaped, so a dot in `uv.lock` matches a literal dot rather than
+            // any character.
+            const globToRegExp = (glob) => {
+              let out = '';
+              for (let i = 0; i < glob.length; i += 1) {
+                const c = glob[i];
+                if (c === '*') {
+                  if (glob[i + 1] === '*') {
+                    out += '.*';
+                    i += 1;
+                    // `**/` also matches zero directories, so `a/**/b` matches
+                    // `a/b` and not only `a/x/b`.
+                    if (glob[i + 1] === '/') { out += '(?:/)?'; i += 1; }
+                  } else {
+                    out += '[^/]*';
+                  }
+                } else if (c === '?') {
+                  out += '[^/]';
+                } else {
+                  out += c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                }
+              }
+              return new RegExp(`^${out}$`);
+            };
+            const pathMatchers = cfg.allowedPaths.map(globToRegExp);
+
+            // Latest review per reviewer, counting only states that express a
+            // decision. COMMENTED and DISMISSED reviews must not overwrite an
+            // earlier APPROVED or CHANGES_REQUESTED verdict.
+            const latestDecisions = (reviews) => {
+              const byUser = new Map();
+              for (const review of reviews) {
+                if (!['APPROVED', 'CHANGES_REQUESTED'].includes(review.state)) continue;
+                const login = review.user?.login;
+                if (!login) continue;
+                byUser.set(login, review);
+              }
+              return byUser;
+            };
+
+            // Collapse check runs and legacy commit statuses into one
+            // context -> state map. A required context may be satisfied by
+            // either, and a re-run produces a second check run under the same
+            // name, so the highest id (most recent) wins.
+            const collectChecks = async (sha) => {
+              const contexts = new Map();
+              const record = (name, state, completedAt, id) => {
+                const prev = contexts.get(name);
+                if (prev && prev.id > id) return;
+                contexts.set(name, { name, state, completedAt, id });
+              };
+
+              const runs = await github.paginate(github.rest.checks.listForRef, {
+                owner, repo, ref: sha, per_page: 100,
+              });
+              for (const run of runs) {
+                let state;
+                if (run.status !== 'completed') {
+                  state = 'pending';
+                } else if (PASSED_CONCLUSIONS.has(run.conclusion)) {
+                  state = 'success';
+                } else if (FAILED_CONCLUSIONS.has(run.conclusion)) {
+                  state = 'failure';
+                } else {
+                  // An unrecognised conclusion is treated as a failure rather
+                  // than assumed benign. Failing closed is the whole point.
+                  state = 'failure';
+                }
+                record(run.name, state, run.completed_at, run.id);
+              }
+
+              const combined = await github.rest.repos.getCombinedStatusForRef({
+                owner, repo, ref: sha, per_page: 100,
+              });
+              for (const status of combined.data.statuses || []) {
+                let state;
+                if (status.state === 'success') state = 'success';
+                else if (status.state === 'pending') state = 'pending';
+                else state = 'failure';
+                record(status.context, state, status.updated_at, status.id);
+              }
+
+              return contexts;
+            };
+
+            // Contexts the RULESET requires for a branch, read from the rules
+            // API so the bot and the ruleset can never drift. Returns the
+            // flattened rules from every stacked ruleset matching the branch,
+            // which is exactly what GitHub enforces at merge time.
+            const branchRules = async (branch) => {
+              const res = await github.request(
+                'GET /repos/{owner}/{repo}/rules/branches/{branch}',
+                { owner, repo, branch },
+              );
+              const contexts = [];
+              let strict = false;
+              for (const rule of res.data || []) {
+                if (rule.type !== 'required_status_checks') continue;
+                strict = strict || Boolean(rule.parameters?.strict_required_status_checks_policy);
+                for (const c of rule.parameters?.required_status_checks || []) {
+                  contexts.push(c.context);
+                }
+              }
+              return { contexts, strict };
+            };
+
+            // ---------------------------------------------------------------
+            // Eligibility
+            // ---------------------------------------------------------------
+            // Returns { eligible, reason, candidate }. Ordered cheapest first so
+            // an unrelated human PR costs one label comparison.
+            const evaluate = async (pr) => {
+              const no = (reason) => ({ eligible: false, reason, candidate: false });
+              const refuse = (reason) => ({ eligible: false, reason, candidate: true });
+
+              if (!(pr.labels || []).some((l) => l.name === cfg.label)) {
+                return no(`no \`${cfg.label}\` label`);
+              }
+              if (!cfg.allowedAuthors.has(pr.user?.login)) {
+                return no(`author \`${pr.user?.login}\` is not in the allow-list`);
+              }
+              // Past this point the PR is a candidate: it asked to be merged and
+              // its opener is trusted, so every later refusal is worth saying
+              // out loud on the PR itself.
+              if (pr.draft) return refuse('PR is a draft');
+
+              const commits = await github.paginate(github.rest.pulls.listCommits, {
+                owner, repo, pull_number: pr.number, per_page: 100,
+              });
+              for (const commit of commits) {
+                // EVERY commit, not just the PR opener. `pull_request.user.login`
+                // stays the bot after a human pushes to the branch, so checking
+                // only the opener would let a human smuggle code through the
+                // automerge path. `author`/`committer` are the linked GitHub
+                // accounts; an unattributed commit cannot be shown to come from
+                // an allow-listed bot, so it is refused.
+                const authorLogin = commit.author?.login;
+                const committerLogin = commit.committer?.login;
+                if (!cfg.allowedAuthors.has(authorLogin) || !cfg.allowedAuthors.has(committerLogin)) {
+                  return refuse(
+                    `commit \`${commit.sha.slice(0, 7)}\` is authored by ` +
+                    `\`${authorLogin || 'unknown'}\`/\`${committerLogin || 'unknown'}\`, ` +
+                    'not an allow-listed bot',
+                  );
+                }
+              }
+
+              const { contexts: ruleContexts, strict } = await branchRules(pr.base.ref);
+
+              // The union is the point. `ruleContexts` is the floor GitHub
+              // enforces for everyone; `expectedChecks` is the extra bar this
+              // repo sets for bot PRs specifically, which can be far higher
+              // because it wedges nothing when it is not met — the PR simply
+              // waits for a human instead of merging itself.
+              const mustPass = [...new Set([...ruleContexts, ...cfg.expectedChecks])];
+              if (mustPass.length === 0) {
+                return refuse(
+                  `neither the rulesets on \`${pr.base.ref}\` nor expected_checks name a single ` +
+                  'check; refusing to merge having verified nothing',
+                );
+              }
+
+              const checks = await collectChecks(pr.head.sha);
+
+              // A skipped job reports NO status at all, so "nothing is failing"
+              // is trivially true on a PR where nothing ran. Each context must
+              // be PRESENT and successful, not merely not-failing. This is the
+              // check native auto-merge cannot make.
+              for (const name of mustPass) {
+                const check = checks.get(name);
+                if (!check) return refuse(`expected check \`${name}\` has not reported`);
+                if (check.state === 'pending') return refuse(`check \`${name}\` is still running`);
+                if (check.state !== 'success') return refuse(`check \`${name}\` did not pass`);
+              }
+
+              const pending = [...checks.values()].filter((c) => c.state === 'pending');
+              if (pending.length > 0) {
+                return refuse(`${pending.length} check(s) still running, e.g. \`${pending[0].name}\``);
+              }
+              if (cfg.blockOnAnyFailure) {
+                const failed = [...checks.values()].filter((c) => c.state === 'failure');
+                if (failed.length > 0) {
+                  return refuse(`check \`${failed[0].name}\` is failing`);
+                }
+              }
+
+              const reviews = await github.paginate(github.rest.pulls.listReviews, {
+                owner, repo, pull_number: pr.number, per_page: 100,
+              });
+              const decisions = latestDecisions(reviews);
+              for (const [login, review] of decisions) {
+                if (review.state === 'CHANGES_REQUESTED') {
+                  return refuse(`\`${login}\` has requested changes`);
+                }
+              }
+              const selfApproved = decisions.get(cfg.botLogin)?.state === 'APPROVED';
+
+              // `mergeable` is absent from the list endpoint and is computed
+              // lazily, so it needs the detail call and may legitimately be null
+              // on the first look. Null means "ask again next tick".
+              const { data: detail } = await github.rest.pulls.get({
+                owner, repo, pull_number: pr.number,
+              });
+              // `== null` catches undefined too. The real API always returns the
+              // key, but treating a missing one as "merge away" would be the
+              // wrong direction to fail in.
+              if (detail.mergeable == null) return refuse('mergeability not computed yet');
+              if (detail.mergeable === false) return refuse('PR has conflicts with the base branch');
+              if (strict && detail.mergeable_state === 'behind') {
+                return refuse('branch is behind base and the ruleset requires it to be up to date');
+              }
+              if (cfg.maxChangedFiles > 0 && detail.changed_files > cfg.maxChangedFiles) {
+                return refuse(`touches ${detail.changed_files} files, over the limit of ${cfg.maxChangedFiles}`);
+              }
+
+              if (pathMatchers.length > 0) {
+                const files = await github.paginate(github.rest.pulls.listFiles, {
+                  owner, repo, pull_number: pr.number, per_page: 100,
+                });
+                for (const file of files) {
+                  if (!pathMatchers.some((re) => re.test(file.filename))) {
+                    return refuse(`\`${file.filename}\` is outside the allowed paths`);
+                  }
+                }
+              }
+
+              // Settle window, measured from the last check to complete rather
+              // than slept through. Catches a workflow that has not registered
+              // a check run yet, which is the case a naive "all green" misses.
+              const completions = [...checks.values()]
+                .map((c) => (c.completedAt ? Date.parse(c.completedAt) : NaN))
+                .filter((t) => Number.isFinite(t));
+              if (completions.length > 0) {
+                const waited = Math.floor((Date.now() - Math.max(...completions)) / 1000);
+                if (waited < cfg.settleSeconds) {
+                  return refuse(`settling, ${cfg.settleSeconds - waited}s remaining`);
+                }
+              }
+
+              return { eligible: true, candidate: true, selfApproved, headSha: pr.head.sha };
+            };
+
+            // ---------------------------------------------------------------
+            // Reporting
+            // ---------------------------------------------------------------
+            // One comment per PR, updated in place. A 10-minute poller that
+            // posted a new comment each tick would bury the PR within a day.
+            const upsertComment = async (prNumber, body) => {
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner, repo, issue_number: prNumber, per_page: 100,
+              });
+              const mine = comments.find(
+                (c) => c.user?.login === cfg.botLogin && (c.body || '').includes(MARKER),
+              );
+              const full = `${MARKER}\n${body}`;
+              if (mine) {
+                await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body: full });
+              } else {
+                await github.rest.issues.createComment({ owner, repo, issue_number: prNumber, body: full });
+              }
+            };
+
+            // ---------------------------------------------------------------
+            // Main
+            // ---------------------------------------------------------------
+            const prs = await github.paginate(github.rest.pulls.list, {
+              owner, repo, state: 'open', per_page: 100,
+            });
+
+            const rows = [];
+            for (const pr of prs) {
+              const verdict = await evaluate(pr);
+              rows.push([`#${pr.number}`, verdict.eligible ? 'eligible' : 'skipped', verdict.reason || '']);
+
+              // A PR that is not a candidate is some human's ordinary work.
+              // It gets a line in the job summary and nothing on the PR itself.
+              if (!verdict.candidate) continue;
+
+              if (!verdict.eligible) {
+                await upsertComment(pr.number, `Not merging yet: ${verdict.reason}.`);
+                continue;
+              }
+
+              if (cfg.mode === 'report') {
+                await upsertComment(
+                  pr.number,
+                  'All eligibility conditions are met. Running in `report` mode, so nothing was approved or merged.',
+                );
+                continue;
+              }
+
+              if (!verdict.selfApproved) {
+                await github.rest.pulls.createReview({
+                  owner, repo, pull_number: pr.number, event: 'APPROVE',
+                  body: 'Automerge conditions met: an allow-listed bot authored every commit, the opt-in label is present, and every expected check reported success.',
+                });
+                await upsertComment(
+                  pr.number,
+                  'Approved. The merge happens on a later poll, so there is a window to intervene.',
+                );
+                // Approving and merging in the same tick would leave no such
+                // window, which is the only reason to approve separately at all.
+                continue;
+              }
+
+              if (cfg.mode !== 'merge') {
+                await upsertComment(pr.number, 'Approved. Running in `approve` mode, so the merge is left to a human.');
+                continue;
+              }
+
+              try {
+                // `sha` pins the merge to the head this run actually evaluated.
+                // Without it, a push landing between evaluation and merge would
+                // be merged unexamined, and the settle window would be the thing
+                // that made that likely rather than the thing that prevented it.
+                await github.rest.pulls.merge({
+                  owner, repo, pull_number: pr.number,
+                  merge_method: cfg.mergeMethod,
+                  sha: verdict.headSha,
+                });
+                rows[rows.length - 1][1] = 'merged';
+              } catch (err) {
+                // A merge refused by GitHub is the system working: the ruleset
+                // declined it. Report it and move on rather than failing the run
+                // and skipping every remaining PR.
+                rows[rows.length - 1][1] = 'merge refused';
+                rows[rows.length - 1][2] = err.message;
+                await upsertComment(pr.number, `Merge was refused by GitHub: ${err.message}`);
+              }
+            }
+
+            await core.summary
+              .addHeading(`Automerge (${cfg.mode} mode)`, 3)
+              .addTable([
+                [{ data: 'PR', header: true }, { data: 'Outcome', header: true }, { data: 'Reason', header: true }],
+                ...rows,
+              ])
+              .write();

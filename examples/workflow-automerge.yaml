@@ -1,0 +1,43 @@
+name: Automerge
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Automerge
+# Approves and merges PRs opened by an allow-listed bot once every expected
+# check has reported green. Policy lives in `.github/automerge.yaml`; this file
+# holds only the plumbing.
+# ─────────────────────────────────────────────────────────────────────────────
+# SETUP
+# 1. Copy `examples/automerge.yaml` to `.github/automerge.yaml` and edit it.
+#    Without that file this workflow fails loudly rather than merging anything.
+# 2. Install the merge App on this repo.
+# 3. Add `DR_AUTO_MERGE_PRIVATE_KEY` as a secret this repo can read.
+# 4. Add the App to `bypass_actors` on the ruleset carrying the `pull_request`
+#    rule — and ONLY that ruleset. Bypass applies to a whole ruleset, so the
+#    required-checks rule must live in a separate one with an empty bypass list,
+#    or the bot would be able to merge a red PR.
+# 5. Leave `mode: report` until you have watched it for a week.
+# ─────────────────────────────────────────────────────────────────────────────
+# WHY A CRON AND NOT `pull_request`
+# A Dependabot `pull_request` event cannot read this repo's Actions secrets, so
+# the App key would arrive empty. GitHub also drops workflow dispatches from
+# time to time, and a fire-once bot would skip those PRs permanently. Polling
+# fixes both, and makes "wait for the checks" free.
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  automerge:
+    uses: datarobot-oss/github-actions/.github/workflows/automerge.yaml@0.0.27
+    with:
+      # Public metadata, not a secret. `dr-auto-merge` is 4912188.
+      app_id: '4912188'
+      # report -> approve -> merge. Start at report and move one step at a time.
+      mode: 'report'
+    secrets:
+      app_private_key: ${{ secrets.DR_AUTO_MERGE_PRIVATE_KEY }}
+    permissions:
+      contents: read

@@ -22,6 +22,19 @@ export function makeGithub(responses = {}) {
     'rest.issues.deleteLabel': { data: {} },
     'rest.issues.listForRepo': { data: [] },
     'rest.pulls.get': { data: { head: { ref: 'unknown' } } },
+    // automerge.yaml. The defaults describe the most boring possible repo: no
+    // open PRs, no commits, no reviews, no checks. Every test then supplies
+    // only the state its own case is about, so a test that forgets to stub
+    // something fails by finding nothing rather than by inheriting another
+    // test's fixture.
+    'rest.pulls.list': { data: [] },
+    'rest.pulls.listCommits': { data: [] },
+    'rest.pulls.listReviews': { data: [] },
+    'rest.pulls.listFiles': { data: [] },
+    'rest.pulls.createReview': { data: {} },
+    'rest.pulls.merge': { data: { merged: true } },
+    'rest.checks.listForRef': { data: [] },
+    'rest.repos.getCombinedStatusForRef': { data: { statuses: [] } },
   };
   const make = (key) =>
     async (params) => {
@@ -57,9 +70,35 @@ export function makeGithub(responses = {}) {
       },
       pulls: {
         get: make('rest.pulls.get'),
+        list: make('rest.pulls.list'),
+        listCommits: make('rest.pulls.listCommits'),
+        listReviews: make('rest.pulls.listReviews'),
+        listFiles: make('rest.pulls.listFiles'),
+        createReview: make('rest.pulls.createReview'),
+        merge: make('rest.pulls.merge'),
+      },
+      checks: {
+        listForRef: make('rest.checks.listForRef'),
+      },
+      repos: {
+        getCombinedStatusForRef: make('rest.repos.getCombinedStatusForRef'),
       },
     },
   };
+
+  // `github.request(route, params)` takes the route as a first argument, which
+  // the `make` helper above cannot model. Stub it per route, keyed
+  // `request:GET /some/{route}`, so a test can drive the branch-rules endpoint
+  // without a real Octokit.
+  client.request = async (route, params) => {
+    calls.push({ method: 'request', route, params });
+    const key = `request:${route}`;
+    const r = key in responses ? responses[key] : { data: [] };
+    const resolved = typeof r === 'function' ? r(params) : r;
+    if (resolved instanceof Error) throw resolved;
+    return resolved;
+  };
+
   return client;
 }
 
@@ -87,7 +126,21 @@ export async function runGithubScript(script, { github, context, env = {}, templ
   const logs = [];
   const fakeConsole = { log: (...a) => logs.push(a.join(' ')), error: (...a) => logs.push(a.join(' ')) };
   const fakeProcess = { env: { ...env } };
-  const core = { setFailed: (m) => { throw new Error(`core.setFailed: ${m}`); }, info: () => {}, warning: () => {} };
+  // `core.summary` is a chainable builder in the real toolkit. The fake keeps
+  // the chain and swallows the content: a workflow writing a job summary is not
+  // behaviour worth asserting on, but a missing method would crash the script.
+  const summary = {
+    addHeading: () => summary,
+    addTable: () => summary,
+    addRaw: () => summary,
+    write: async () => summary,
+  };
+  const core = {
+    setFailed: (m) => { throw new Error(`core.setFailed: ${m}`); },
+    info: () => {},
+    warning: () => {},
+    summary,
+  };
   const fn = new AsyncFunction('github', 'context', 'core', 'process', 'console', rendered);
   await fn(github, context, core, fakeProcess, fakeConsole);
   return { logs };

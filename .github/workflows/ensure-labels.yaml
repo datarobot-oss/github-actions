@@ -5,12 +5,21 @@ name: Ensure PR-automation labels
 # is good to go — the labels exist with consistent colour/description, so the
 # helper jobs never fail on a missing label.
 #
-# Always ensured: the review labels `00 - Ready for Review` / `00 - Reviewed`
-# and the two fixed backport labels `backport-failed` / `do not merge`.
+# Always ensured: the review labels `00 - Ready for Review` / `00 - Reviewed`,
+# the two fixed backport labels `backport-failed` / `do not merge`, and the
+# `automerge` / `dependencies` pair.
+#
+# `automerge` and `dependencies` are here for a reason that is easy to miss:
+# **Dependabot silently ignores a label that does not exist in the repo.** It
+# does not create it and it does not warn. So a `labels:` entry in
+# dependabot.yml pointing at a missing label is a no-op, and an automerge
+# workflow keyed on that label would simply never fire, with nothing anywhere
+# saying why. Creating them up front is what makes that configuration real.
 #
 # Pass `backport_branches` to ALSO create the per-branch backport label pairs
-# (`backport <branch>` + `backported <branch>`) for your release lines — these
-# vary per repo, so they're opt-in rather than hardcoded.
+# (`backport <branch>` + `backported <branch>`) for your release lines, and
+# `dependabot_ecosystems` for the per-ecosystem labels (`github-actions`,
+# `pip`, ...). Both vary per repo, so they're opt-in rather than hardcoded.
 
 on:
   workflow_call:
@@ -31,6 +40,16 @@ on:
           labels for (e.g. "release/11.1, release/11.2"). For each, both
           `backport <branch>` (trigger) and `backported <branch>` (applied on
           success) are created.
+        required: false
+        default: ''
+        type: string
+      dependabot_ecosystems:
+        description: >-
+          Optional comma/space-separated Dependabot ecosystems to create labels
+          for (e.g. "github-actions, pip"). Match the `labels:` entries in your
+          dependabot.yml: a label Dependabot is told to apply but which does not
+          exist in the repo is silently dropped, so the PRs arrive unlabelled and
+          anything keyed on that label never runs.
         required: false
         default: ''
         type: string
@@ -56,6 +75,7 @@ jobs:
           # can DELETE repo labels and the file already states the rule above.
           # No reason to leave the one exception in place.
           DELETE_CONFUSABLE: ${{ inputs.delete_confusable }}
+          DEPENDABOT_ECOSYSTEMS: ${{ inputs.dependabot_ecosystems }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
@@ -87,7 +107,28 @@ jobs:
                 color: 'ff0000',
                 description: 'Do not merge yet (e.g. CI has not run on a backport PR).',
               },
+              {
+                name: 'automerge',
+                color: '0e8a16',
+                description: 'Opts a bot-authored PR into unattended approve-and-merge once every expected check is green.',
+              },
+              {
+                name: 'dependencies',
+                color: '0366d6',
+                description: 'Dependency update, usually opened by Dependabot.',
+              },
             ];
+
+            // Optional per-ecosystem Dependabot labels, e.g. `github-actions`.
+            // Ecosystem-specific, so opt-in rather than hardcoded: a repo whose
+            // Dependabot only watches npm has no use for a `pip` label.
+            const ecosystems = (process.env.DEPENDABOT_ECOSYSTEMS || '')
+              .split(/[\s,]+/).map(s => s.trim()).filter(Boolean);
+            const ecosystemLabels = ecosystems.map(name => ({
+              name,
+              color: '0366d6',
+              description: `Dependency update for the ${name} ecosystem.`,
+            }));
 
             // Optional per-branch backport labels, generated from the input list.
             const backportBranches = (process.env.BACKPORT_BRANCHES || '')
@@ -103,7 +144,7 @@ jobs:
             // whose labels differ only in case — would otherwise queue the same
             // label twice and the second createLabel would 422 "already_exists".
             const desiredLower = new Set();
-            const desired = [...CANONICAL, ...backportLabels].filter(l => {
+            const desired = [...CANONICAL, ...ecosystemLabels, ...backportLabels].filter(l => {
               const key = l.name.toLowerCase();
               if (desiredLower.has(key)) return false;
               desiredLower.add(key);
