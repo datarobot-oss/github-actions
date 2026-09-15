@@ -157,7 +157,7 @@ jobs:
                   return [str(item) for item in value]
               sys.exit("::error::expected a string or a list, got %r" % (value,))
 
-          for key in ("allowed_authors", "expected_checks", "allowed_paths"):
+          for key in ("allowed_authors", "expected_checks", "allowed_paths", "review_bot_logins"):
               data[key] = as_list(data.get(key))
 
           # One line, because $GITHUB_ENV heredocs are delimited by line and a
@@ -225,6 +225,11 @@ jobs:
               return;
             }
 
+            // `cursor[bot]` (REST) and `cursor` (GraphQL) are the same account.
+            // Lower-cased so a policy's capitalisation never decides a merge.
+            const normaliseLogin = (login) =>
+              String(login || '').toLowerCase().replace(/\[bot\]$/, '');
+
             const readInt = (name, value, fallback) => {
               if (value === undefined || value === null || value === '') return fallback;
               // Number() rather than parseInt() so "5 bananas" is rejected as
@@ -249,6 +254,19 @@ jobs:
                 // Defaults ON. A policy that forgets the key gets the strict
                 // behaviour, not the permissive one.
                 blockOnAnyFailure: raw.block_on_any_failure !== false,
+                // Defaults OFF, unlike the flag above. This one is opt-in
+                // because it hands a PR to a human on the say-so of a
+                // third-party bot that need not even be installed, so a repo
+                // that has never heard of Bugbot must not inherit it.
+                blockOnCursorComments: raw.block_on_cursor_comments === true,
+                // Which logins count as a review bot. Normalised because the
+                // same bot is spelled two ways: REST calls it `cursor[bot]`,
+                // GraphQL calls it `cursor`. Compared without the suffix so a
+                // policy can write either and still match.
+                reviewBotLogins: new Set(
+                  ((raw.review_bot_logins || []).length > 0 ? raw.review_bot_logins : ['cursor[bot]'])
+                    .map(normaliseLogin),
+                ),
                 mergeMethod: raw.merge_method === undefined ? 'squash' : String(raw.merge_method),
                 // Empty disables escalation entirely, which is the default: the
                 // label has to exist in the repo, and not every consumer runs
@@ -367,6 +385,73 @@ jobs:
               }
 
               return contexts;
+            };
+
+            // Open findings left by a review bot (Cursor Bugbot and friends).
+            //
+            // REST cannot answer this. A Bugbot finding is an inline review
+            // COMMENT, and `listReviews` reports its parent review as
+            // `COMMENTED`, a state the decision logic above deliberately
+            // ignores so that an ordinary "looks good" note cannot block a
+            // merge. Worse, REST has no notion of a resolved conversation at
+            // all, so it cannot tell a live finding from one a human has
+            // already dealt with. Review THREADS carry both facts, and they
+            // only exist in GraphQL.
+            //
+            // Threads are also the right unit rather than the summary review.
+            // Bugbot posts its "reviewed your changes" summary whether or not
+            // it found anything, but it opens an inline thread only when it
+            // actually has something to say. So counting threads asks "did the
+            // bot find something", where counting comments would ask "did the
+            // bot run", and the second question blocks every PR forever.
+            const openBotFindings = async (prNumber) => {
+              const query = `
+                query($owner:String!, $repo:String!, $number:Int!, $cursor:String) {
+                  repository(owner:$owner, name:$repo) {
+                    pullRequest(number:$number) {
+                      reviewThreads(first:100, after:$cursor) {
+                        pageInfo { hasNextPage endCursor }
+                        nodes {
+                          isResolved
+                          isOutdated
+                          path
+                          comments(first:1) { nodes { author { login } } }
+                        }
+                      }
+                    }
+                  }
+                }`;
+
+              const found = [];
+              let cursor = null;
+              for (;;) {
+                const res = await github.graphql(query, {
+                  owner, repo, number: prNumber, cursor,
+                });
+                const threads = res?.repository?.pullRequest?.reviewThreads;
+                for (const thread of threads?.nodes || []) {
+                  // A human explicitly clearing the conversation is the signal
+                  // that the finding has been dealt with, so a resolved thread
+                  // never blocks.
+                  if (thread.isResolved) continue;
+                  // Outdated means the lines the bot pointed at are no longer
+                  // in the diff, so the finding no longer describes this PR.
+                  // Counting it would be worse than useless: after a push that
+                  // genuinely fixes the problem, re-applying the opt-in label
+                  // would escalate the PR again on the very next poll, and the
+                  // PR could never be handed back to the bot.
+                  if (thread.isOutdated) continue;
+                  // The thread's FIRST comment is its author. A later reply
+                  // from anyone else does not make the thread theirs, and a
+                  // human replying to a Bugbot finding must not launder it.
+                  const author = thread.comments?.nodes?.[0]?.author?.login;
+                  if (!cfg.reviewBotLogins.has(normaliseLogin(author))) continue;
+                  found.push({ login: author, path: thread.path });
+                }
+                if (!threads?.pageInfo?.hasNextPage) break;
+                cursor = threads.pageInfo.endCursor;
+              }
+              return found;
             };
 
             // Contexts the RULESET requires for a branch, read from the rules
@@ -520,6 +605,28 @@ jobs:
                 }
               }
               const selfApproved = decisions.get(cfg.botLogin)?.state === 'APPROVED';
+
+              if (cfg.blockOnCursorComments) {
+                let findings;
+                try {
+                  findings = await openBotFindings(pr.number);
+                } catch (err) {
+                  // Deliberately transient, not terminal. Escalation is
+                  // one-shot: it strips the opt-in label, so a GraphQL outage
+                  // or a token missing a scope would spend a PR's single
+                  // handover on an error that says nothing about the PR. The
+                  // next poll asks again, and nothing merges meanwhile.
+                  core.warning(`Could not read review threads on #${pr.number}: ${err.message}`);
+                  return refuse(`could not read review threads (${err.message})`);
+                }
+                if (findings.length > 0) {
+                  const { login, path } = findings[0];
+                  return escalate(
+                    `\`${login}\` has ${findings.length} unresolved review ` +
+                    `comment(s), e.g. on \`${path || 'this PR'}\``,
+                  );
+                }
+              }
 
               // `mergeable` is absent from the list endpoint and is computed
               // lazily, so it needs the detail call and may legitimately be null
