@@ -63,6 +63,41 @@ expected_checks:
 # policy that omits the key gets the strict behaviour.
 block_on_any_failure: true
 
+# ─────────────────────────────────────────────────────────────────────────────
+# block_on_cursor_comments — treat an AI reviewer's finding as a failure
+#
+# Cursor Bugbot (and anything like it) does not report through a check. It
+# leaves an inline review comment, and its parent review is `COMMENTED`, a state
+# automerge otherwise ignores on purpose so that an ordinary "looks good" note
+# cannot stop a merge. The result without this flag is that a bot PR can carry a
+# high-severity Bugbot finding and still merge itself, because every check was
+# green and nobody clicked "Request changes".
+#
+# Turn this on and an open finding becomes a TERMINAL refusal: the opt-in label
+# comes off, `escalate_label` goes on, and the PR is handed to a person.
+#
+# What counts as "open" is the thing to understand. Automerge looks at review
+# THREADS, not comments:
+#   - RESOLVED threads never block. Clicking "Resolve conversation" is how a
+#     person says the finding has been dealt with.
+#   - OUTDATED threads never block. The lines the bot pointed at are no longer
+#     in the diff, so the finding no longer describes this PR. This is also what
+#     makes the escalation recoverable: fix the code, re-apply the label.
+#   - Bugbot's "I reviewed your changes" summary is not a thread, so a clean
+#     review does not block. It opens a thread only when it found something.
+#
+# Defaults to false. Unlike the other guards this one hands your PR to a human
+# on the say-so of a third-party bot, so it is opt-in.
+# ─────────────────────────────────────────────────────────────────────────────
+block_on_cursor_comments: true
+
+# Which logins count as a review bot for the flag above. Defaults to
+# `cursor[bot]`, so most repos can leave this out entirely. The `[bot]` suffix
+# is optional: GitHub spells the same account `cursor[bot]` in the REST API and
+# `cursor` in GraphQL, and both forms match.
+review_bot_logins:
+  - cursor[bot]
+
 # Quiet time required between the last check completing and the merge, measured
 # against the check timestamps rather than slept through. Its real job is
 # catching a workflow that has not registered a check run yet.

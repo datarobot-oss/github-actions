@@ -14,6 +14,15 @@ Entries below 0.0.19 were backfilled from the
 than exhaustive.
 
 ## Unreleased
+- `automerge.yaml` takes an optional `block_on_cursor_comments`. Cursor Bugbot reports its
+  findings as inline review comments rather than as a check, and its parent review is
+  `COMMENTED`, a state automerge ignores on purpose so an ordinary remark cannot stop a merge.
+  The gap was that a bot PR could carry a high-severity Bugbot finding and still merge itself.
+  With the flag on, an open finding is a terminal refusal: the opt-in label comes off,
+  `escalate_label` goes on, and a human is asked to look. Resolved and outdated threads do not
+  count, so fixing the code or resolving the conversation hands the PR back to the bot.
+  Defaults to **false**, so this changes nothing for a consumer that does not opt in.
+  `review_bot_logins` picks the logins, defaulting to `cursor[bot]`.
 
 ## 0.0.28 - 2026-09-11
 - Fix `automerge` to handle dependabot naming

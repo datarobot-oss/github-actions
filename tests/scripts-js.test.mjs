@@ -722,6 +722,7 @@ const policy = (over = {}) =>
     label: 'automerge',
     expected_checks: ['Unit CI'],
     allowed_paths: [],
+    review_bot_logins: [],
     block_on_any_failure: true,
     settle_seconds: 0,
     max_changed_files: 0,
@@ -1028,6 +1029,183 @@ test('automerge: a later COMMENTED review does not clear an earlier CHANGES_REQU
   await runAutomerge(github);
 
   assert.equal(mergeCalls(github).length, 0, 'a drive-by comment must not count as resolution');
+});
+
+// --- review-bot findings (block_on_cursor_comments) ------------------------
+// Cursor Bugbot reports a finding as an inline review COMMENT, whose parent
+// review is `COMMENTED` — a state the decision logic deliberately ignores. So
+// none of the review tests above can see a Bugbot finding, and REST cannot tell
+// a live one from a resolved one at all. That lives in GraphQL review threads.
+
+/** A GraphQL reviewThreads payload. */
+const threads = (...nodes) => ({
+  repository: {
+    pullRequest: { reviewThreads: { pageInfo: { hasNextPage: false }, nodes } },
+  },
+});
+
+/** One thread, shaped like a real Bugbot finding on PR af-component-agent#692. */
+const botThread = (over = {}) => ({
+  isResolved: false,
+  isOutdated: false,
+  path: 'pyproject.toml',
+  comments: { nodes: [{ author: { login: 'cursor' } }] },
+  ...over,
+});
+
+const CURSOR_ON = { block_on_cursor_comments: true };
+
+// The headline case. An unresolved Bugbot finding is a human's problem, not
+// something the next poll resolves, so it escalates rather than waiting.
+test('automerge: an unresolved cursor finding hands the PR to a human', async () => {
+  const github = happyPath({ graphql: threads(botThread()) });
+
+  await runAutomerge(github, { mode: 'merge', config: CURSOR_ON });
+
+  assert.equal(mergeCalls(github).length, 0);
+  assert.equal(github.callsTo('rest.issues.removeLabel').length, 1, 'drops the opt-in label');
+  assert.deepEqual(
+    github.callsTo('rest.issues.addLabels')[0].params.labels,
+    ['00 - Ready for Review'],
+  );
+  assert.match(commentBodies(github).join('\n'), /unresolved review comment\(s\)/);
+});
+
+// Off by default: the flag hands a PR to a human on the say-so of a third-party
+// bot that need not even be installed, so a repo that never asked for it must
+// not inherit the behaviour on upgrade.
+test('automerge: a cursor finding is ignored unless block_on_cursor_comments is set', async () => {
+  const github = happyPath({
+    graphql: threads(botThread()),
+    'rest.pulls.listReviews': { data: [{ state: 'APPROVED', user: { login: BOT } }] },
+  });
+
+  await runAutomerge(github);
+
+  assert.equal(mergeCalls(github).length, 1, 'default policy merges as before');
+  assert.equal(github.callsTo('graphql').length, 0, 'and does not even ask');
+});
+
+// GraphQL names the account `cursor`; REST names the same account
+// `cursor[bot]`. A policy written either way has to match, or the feature
+// silently does nothing.
+test('automerge: a cursor[bot] policy entry matches the GraphQL login `cursor`', async () => {
+  const github = happyPath({ graphql: threads(botThread()) });
+
+  await runAutomerge(github, {
+    mode: 'merge',
+    config: { ...CURSOR_ON, review_bot_logins: ['Cursor[bot]'] },
+  });
+
+  assert.equal(mergeCalls(github).length, 0);
+  assert.match(commentBodies(github).join('\n'), /unresolved review comment/);
+});
+
+// Resolving the conversation is how a human says the finding is dealt with.
+test('automerge: a resolved cursor thread does not block', async () => {
+  const github = happyPath({
+    graphql: threads(botThread({ isResolved: true })),
+    'rest.pulls.listReviews': { data: [{ state: 'APPROVED', user: { login: BOT } }] },
+  });
+
+  await runAutomerge(github, { mode: 'merge', config: CURSOR_ON });
+
+  assert.equal(mergeCalls(github).length, 1);
+});
+
+// Outdated means the lines the bot pointed at are gone from the diff. Counting
+// it would make the escalation unrecoverable: after a push that genuinely fixes
+// the problem, re-applying the label would escalate again on the next poll.
+test('automerge: an outdated cursor thread does not block', async () => {
+  const github = happyPath({
+    graphql: threads(botThread({ isOutdated: true })),
+    'rest.pulls.listReviews': { data: [{ state: 'APPROVED', user: { login: BOT } }] },
+  });
+
+  await runAutomerge(github, { mode: 'merge', config: CURSOR_ON });
+
+  assert.equal(mergeCalls(github).length, 1);
+});
+
+// The flag is about review BOTS. An ordinary human conversation is already
+// covered by CHANGES_REQUESTED, and blocking on it too would mean any passing
+// remark stopped the merge.
+test('automerge: an unresolved thread from a human does not block', async () => {
+  const github = happyPath({
+    graphql: threads(botThread({ comments: { nodes: [{ author: { login: 'mjnitz02' } }] } })),
+    'rest.pulls.listReviews': { data: [{ state: 'APPROVED', user: { login: BOT } }] },
+  });
+
+  await runAutomerge(github, { mode: 'merge', config: CURSOR_ON });
+
+  assert.equal(mergeCalls(github).length, 1);
+});
+
+// A thread belongs to whoever opened it. A human replying to a Bugbot finding
+// must not launder it into a human thread.
+test('automerge: a human reply does not take over a cursor thread', async () => {
+  const github = happyPath({
+    graphql: threads(botThread({
+      comments: { nodes: [{ author: { login: 'cursor' } }, { author: { login: 'mjnitz02' } }] },
+    })),
+  });
+
+  await runAutomerge(github, { mode: 'merge', config: CURSOR_ON });
+
+  assert.equal(mergeCalls(github).length, 0);
+});
+
+// Bugbot's summary review is posted whether or not it found anything, so the
+// blocking signal has to be the thread, not the fact that the bot ran.
+test('automerge: a cursor review with no threads does not block', async () => {
+  const github = happyPath({
+    graphql: threads(),
+    'rest.pulls.listReviews': {
+      data: [
+        { state: 'APPROVED', user: { login: BOT } },
+        { state: 'COMMENTED', user: { login: 'cursor[bot]' }, body: 'reviewed your changes' },
+      ],
+    },
+  });
+
+  await runAutomerge(github, { mode: 'merge', config: CURSOR_ON });
+
+  assert.equal(mergeCalls(github).length, 1, 'a summary with no findings is not a finding');
+});
+
+// Escalation is one-shot: it strips the opt-in label. Spending a PR's single
+// handover on a GraphQL outage would say nothing about the PR, so a read
+// failure waits for the next poll instead.
+test('automerge: a GraphQL failure waits rather than escalating', async () => {
+  const github = happyPath({ graphql: new Error('Bad credentials') });
+
+  await runAutomerge(github, { mode: 'merge', config: CURSOR_ON });
+
+  assert.equal(mergeCalls(github).length, 0, 'and still merges nothing');
+  assert.equal(github.callsTo('rest.issues.removeLabel').length, 0, 'no label is spent');
+  assert.match(commentBodies(github).join('\n'), /could not read review threads/);
+});
+
+// A PR with more than 100 threads must not merge just because the finding sat
+// on page two.
+test('automerge: a cursor finding on a second page of threads still blocks', async () => {
+  const github = happyPath({
+    graphql: (params) =>
+      params.cursor
+        ? threads(botThread())
+        : {
+            repository: {
+              pullRequest: {
+                reviewThreads: { pageInfo: { hasNextPage: true, endCursor: 'PAGE2' }, nodes: [] },
+              },
+            },
+          },
+  });
+
+  await runAutomerge(github, { mode: 'merge', config: CURSOR_ON });
+
+  assert.equal(mergeCalls(github).length, 0);
+  assert.equal(github.callsTo('graphql').length, 2, 'both pages are read');
 });
 
 test('automerge: a conflicted PR blocks the merge', async () => {

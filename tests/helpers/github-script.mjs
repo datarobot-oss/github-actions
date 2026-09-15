@@ -88,6 +88,20 @@ export function makeGithub(responses = {}) {
     },
   };
 
+  // `github.graphql(query, params)` is how automerge.yaml reads PR review
+  // threads: resolved/outdated state exists only in GraphQL, not REST. Stubbed
+  // under the key `graphql`, as either a value or a (params, query) function so
+  // a test can model pagination. The default is a PR with no review threads.
+  client.graphql = async (query, params) => {
+    calls.push({ method: 'graphql', query, params });
+    const r = 'graphql' in responses
+      ? responses.graphql
+      : { repository: { pullRequest: { reviewThreads: { pageInfo: { hasNextPage: false }, nodes: [] } } } };
+    const resolved = typeof r === 'function' ? r(params, query) : r;
+    if (resolved instanceof Error) throw resolved;
+    return resolved;
+  };
+
   // `github.request(route, params)` takes the route as a first argument, which
   // the `make` helper above cannot model. Stub it per route, keyed
   // `request:GET /some/{route}`, so a test can drive the branch-rules endpoint

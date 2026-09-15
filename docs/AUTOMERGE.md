@@ -186,13 +186,59 @@ Cheapest first. Any failure is a no-op that is logged, never a red X on the PR.
 7. Nothing is queued or in progress.
 8. No other check is failing (`block_on_any_failure`). `skipped` and `neutral` count as a pass.
 9. No outstanding `CHANGES_REQUESTED` review.
-10. The PR is mergeable, and not behind base when the ruleset is strict.
-11. `max_changed_files` and `allowed_paths`.
-12. The settle window has elapsed, measured from the last check completion rather than slept
+10. No open finding from a review bot (`block_on_cursor_comments`, off by default). See below.
+11. The PR is mergeable, and not behind base when the ruleset is strict.
+12. `max_changed_files` and `allowed_paths`.
+13. The settle window has elapsed, measured from the last check completion rather than slept
     through. Its real job is catching a workflow that has not registered a check run yet.
 
 The merge is pinned to the head commit that was evaluated, so a push landing between evaluation
 and merge fails the merge instead of sailing through it unexamined.
+
+## Blocking on an AI reviewer
+
+Cursor Bugbot reviews a PR and leaves its findings as inline review comments. It does not
+report through a check, and it does not click "Request changes". So by default it is invisible
+to everything in the list above: a dependency PR can carry a high-severity Bugbot finding and
+still merge itself, because every check was green and no human said otherwise.
+
+Set `block_on_cursor_comments: true` in the policy and an open finding becomes a **terminal**
+refusal. The PR is handed to a person the same way a red check is.
+
+The subtlety is what counts as open. Automerge reads review **threads**, not comments, because
+threads are the only place GitHub records whether a conversation has been dealt with:
+
+| Thread state | Blocks? | Why |
+|---|---|---|
+| Open | yes | Nobody has looked at it. |
+| Resolved | no | Clicking "Resolve conversation" is a person saying it is handled. |
+| Outdated | no | The lines it pointed at are gone from the diff, so it no longer describes this PR. |
+
+Threads are also the right unit rather than the bot's summary review. Bugbot posts "I reviewed
+your changes" whether or not it found anything, so counting comments would ask *did the bot
+run*, and every PR would block forever. It opens a thread only when it actually found
+something, which is the question worth asking.
+
+Excluding outdated threads is also what keeps the escalation recoverable. Escalation strips the
+opt-in label, and the documented way back is to fix the problem and re-apply it. If a thread
+kept blocking after the code it referred to was rewritten, re-applying the label would escalate
+the PR again on the very next poll and it could never be handed back to the bot.
+
+Which logins count is `review_bot_logins`, defaulting to `cursor[bot]`. GitHub spells the same
+account `cursor[bot]` in REST and `cursor` in GraphQL; both forms match, so the `[bot]` suffix
+is optional.
+
+Two smaller decisions worth knowing:
+
+- **A thread belongs to whoever opened it.** A human replying to a Bugbot finding does not
+  launder it into a human thread.
+- **A failed read waits rather than escalating.** Escalation is one-shot, so spending a PR's
+  single handover on a GraphQL outage or a token missing a scope would burn it on something
+  that says nothing about the PR. The next poll asks again, and nothing merges meanwhile.
+
+This flag is **off by default**, unlike `block_on_any_failure`. It is the one guard that hands
+your PR to a human on the say-so of a third-party bot that need not even be installed, so a
+repo that has never heard of Bugbot does not inherit it on a version bump.
 
 ## When it gives up, it hands over
 
@@ -203,7 +249,8 @@ workflow may not have started, a settle window, a branch behind base, mergeabili
 computed.
 
 **Terminal**, so a person is needed: a check that completed and failed, a PR over
-`max_changed_files`, a file outside `allowed_paths`. None of these resolve on their own.
+`max_changed_files`, a file outside `allowed_paths`, an open review-bot finding. None of these
+resolve on their own.
 
 On a terminal refusal, and only when `escalate_label` is set, the workflow:
 
