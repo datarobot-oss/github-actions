@@ -92,7 +92,7 @@ jobs:
       # never be read from a PR head. That matters: a PR that could supply its
       # own automerge policy could grant itself permission to be merged.
       - name: Check out the default branch
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
 
@@ -180,7 +180,7 @@ jobs:
 
       - name: Mint an App installation token
         id: app-token
-        uses: actions/create-github-app-token@a8d616148505b5069dccd32f177bb87d7f39123b # v2.1.4
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.1.4
         with:
           app-id: ${{ inputs.app_id }}
           private-key: ${{ secrets.app_private_key }}
