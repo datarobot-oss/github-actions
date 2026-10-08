@@ -2,4 +2,4 @@
 # A team from another org silently resolves to nothing, which leaves branch
 # protection's "require code owner review" enforcing no owner at all.
 # Teams: https://github.com/orgs/datarobot-oss/teams
-* @datarobot-oss/buzok
+* @datarobot-oss/agent-lifecycle
