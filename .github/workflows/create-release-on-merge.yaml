@@ -20,6 +20,13 @@ name: Create Release
 # red X on the default branch. That is deliberate. A re-run on an unchanged main
 # has to be a no-op, and a CI-only tweak should not mint a version consumers
 # have to reason about.
+#
+# Auto mode can be GATED the same way, by passing `release_gate_paths`. A gated
+# release is only cut when a file matching one of those paths changed since the
+# latest tag. Everything else (CI, tests, the repo's own lockfile) merges
+# without minting a version. Built for Copier templates, where a tag is what
+# Diffington syncs downstream, so a tag that changes nothing renderable still
+# opens a pull request in every consumer.
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:
@@ -34,6 +41,17 @@ on:
         required: false
         default: ''
         type: string
+      release_gate_paths:
+        description: >-
+          Auto mode only. Newline-separated path patterns, e.g. `copier.yml` and
+          `template/**`. When set, a release is only cut if a file matching one
+          of them changed between the latest tag and the built commit. `*`
+          matches across directories, so `template/*` and `template/**` both
+          cover everything under `template/`. Blank lines and `#` comments are
+          ignored. Leave unset to release on every merge.
+        required: false
+        default: ''
+        type: string
     outputs:
       version:
         description: >-
@@ -44,8 +62,9 @@ on:
       released:
         description: >-
           `true` if a tag and release were created, `false` if the tag already
-          existed and the run was a no-op. Gate follow-on jobs (publish a wheel,
-          push an image) on this rather than on the job's success.
+          existed or the release gate stayed closed, so the run was a no-op.
+          Gate follow-on jobs (publish a wheel, push an image) on this rather
+          than on the job's success.
         value: ${{ jobs.release.outputs.released }}
 
 jobs:
@@ -108,6 +127,80 @@ jobs:
           NEW_VERSION="$MAJOR.$MINOR.$PATCH"
           echo "new-version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
           echo "Next version: $NEW_VERSION"
+      # Diffs against the latest TAG, not the previous commit, so the gate is
+      # cumulative. If a gated change merged but its release failed, the next
+      # merge still sees that change and releases it, whatever it touched.
+      - name: Check the release gate
+        id: gate
+        if: inputs.release_gate_paths != ''
+        env:
+          GATE_PATHS: ${{ inputs.release_gate_paths }}
+          SUPPLIED_VERSION: ${{ inputs.version }}
+          LATEST_TAG: ${{ steps.get-latest-tag.outputs.latest-tag }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          # Refuse rather than guess. In explicit mode the version bump is
+          # already the release decision, and two rules that can disagree
+          # about whether to release are worse than one.
+          if [ -n "${SUPPLIED_VERSION:-}" ]; then
+            echo "::error::release_gate_paths only applies in auto mode; remove it or remove version." >&2
+            exit 1
+          fi
+
+          # The scan strips a `v` prefix, so the real ref may be either spelling.
+          BASE=""
+          for ref in "refs/tags/${LATEST_TAG}" "refs/tags/v${LATEST_TAG}"; do
+            if git rev-parse -q --verify "$ref" >/dev/null; then
+              BASE="$ref"
+              break
+            fi
+          done
+          # No tag yet means no previous release to compare against, so the
+          # first release always goes out.
+          if [ -z "$BASE" ]; then
+            echo "No existing tag to compare against; the gate is open."
+            echo "open=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          PATTERNS=()
+          while IFS= read -r line; do
+            line="${line#"${line%%[![:space:]]*}"}"
+            line="${line%"${line##*[![:space:]]}"}"
+            [ -z "$line" ] && continue
+            case "$line" in \#*) continue ;; esac
+            PATTERNS+=("$line")
+          done <<< "$GATE_PATHS"
+          if [ "${#PATTERNS[@]}" -eq 0 ]; then
+            echo "::error::release_gate_paths is set but names no paths." >&2
+            exit 1
+          fi
+
+          # The pattern is deliberately unquoted on the right of `==`, which is
+          # what makes it a glob. `[[ ]]` does no word splitting or command
+          # substitution, so a pattern is only ever matched, never run.
+          MATCHED=()
+          while IFS= read -r file; do
+            [ -z "$file" ] && continue
+            for pattern in "${PATTERNS[@]}"; do
+              # shellcheck disable=SC2053
+              if [[ "$file" == $pattern ]]; then
+                MATCHED+=("$file")
+                break
+              fi
+            done
+          done < <(git diff --name-only "$BASE" "$HEAD_SHA")
+
+          if [ "${#MATCHED[@]}" -eq 0 ]; then
+            echo "No release-gated path changed since ${LATEST_TAG}."
+            echo "open=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Release-gated paths changed since ${LATEST_TAG}:"
+            printf '  %s\n' "${MATCHED[@]}"
+            echo "open=true" >> "$GITHUB_OUTPUT"
+          fi
       # One place decides what gets tagged, so both modes go through the same
       # validation and the same collision check.
       - name: Resolve the version to release
@@ -118,8 +211,20 @@ jobs:
           # before bash ever parses the line.
           SUPPLIED_VERSION: ${{ inputs.version }}
           COMPUTED_VERSION: ${{ steps.next-version.outputs.new-version }}
+          # Empty when the caller set no gate, which counts as open.
+          GATE_OPEN: ${{ steps.gate.outputs.open }}
+          LATEST_TAG: ${{ steps.get-latest-tag.outputs.latest-tag }}
         run: |
           set -euo pipefail
+
+          # A closed gate is a no-op, like a tag collision. `version` reports the
+          # latest tag, which is the version consumers stay on.
+          if [ "${GATE_OPEN:-true}" = "false" ]; then
+            echo "::notice::No release-gated path changed since ${LATEST_TAG}; nothing to release."
+            echo "released=false" >> "$GITHUB_OUTPUT"
+            echo "version=${LATEST_TAG}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
           if [ -n "${SUPPLIED_VERSION:-}" ]; then
             VERSION="$SUPPLIED_VERSION"

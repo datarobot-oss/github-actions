@@ -1,0 +1,38 @@
+name: Create Release on Merge to Main
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Create Release on Merge to Main (gated, for a Copier template)
+# On a push to main, tags the next patch version and cuts a GitHub release, but
+# only when something Copier renders changed since the latest tag. Tooling-only
+# merges (CI, tests, the repo's own lockfile, CODEOWNERS) mint no version, so
+# Diffington opens no sync pull request downstream.
+# ─────────────────────────────────────────────────────────────────────────────
+# REQUIRED LABELS
+# - None.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Triggered by: every push to main (i.e. a merged PR). Deliberately no `paths:`
+# filter here. The gate inside the reusable workflow compares against the latest
+# tag, so a template change whose release failed is still picked up by the next
+# merge. A `paths:` filter would never run again until the template moved.
+on:
+  push:
+    branches: ["main"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    uses: datarobot-oss/github-actions/.github/workflows/create-release-on-merge.yaml@0.0.32
+    permissions:
+      contents: write
+      pull-requests: read
+    with:
+      # Everything Copier reads when it renders. `_subdirectory` in copier.yml
+      # decides the folder; match it here. Add anything else copier.yml pulls in
+      # (an `_external_data` file, a `_tasks` script) if it lives outside it.
+      release_gate_paths: |
+        copier.yml
+        template/**

@@ -177,6 +177,115 @@ test('release resolve: a shell-injecting version is rejected, not executed', () 
   assert.match(r.stderr, /is not a plain X\.Y\.Z version/);
 });
 
+test('release resolve: a closed gate is a no-op that reports the latest tag', () => {
+  const script = runScript(loadWorkflow('create-release-on-merge'), { id: 'resolve' });
+  const r = runBash(script, {
+    env: { COMPUTED_VERSION: '1.4.10', GATE_OPEN: 'false', LATEST_TAG: '1.4.9', __GIT_TAGS: '1.4.9' },
+  });
+  assert.equal(r.code, 0, 'a tooling-only merge must not red-X main');
+  assert.equal(r.outputs.released, 'false');
+  assert.equal(r.outputs.version, '1.4.9');
+  assert.match(r.stdout, /::notice::No release-gated path changed since 1\.4\.9/);
+});
+
+test('release resolve: an open or unset gate releases as before', () => {
+  const script = runScript(loadWorkflow('create-release-on-merge'), { id: 'resolve' });
+  for (const gateOpen of ['true', '']) {
+    const r = runBash(script, {
+      env: { COMPUTED_VERSION: '1.4.10', GATE_OPEN: gateOpen, LATEST_TAG: '1.4.9', __GIT_TAGS: '1.4.9' },
+    });
+    assert.equal(r.outputs.released, 'true', `GATE_OPEN='${gateOpen}' should release`);
+    assert.equal(r.outputs.version, '1.4.10');
+  }
+});
+
+// --------------------------------------------------------------------------
+// create-release-on-merge.yaml — "Check the release gate"
+// Decides whether anything release-relevant changed since the latest tag.
+// --------------------------------------------------------------------------
+const COPIER_GATE = 'copier.yml\ntemplate/**\n';
+
+function gate({ paths = COPIER_GATE, files = [], tags = '1.4.9', latest = '1.4.9', supplied = '' } = {}) {
+  const script = runScript(loadWorkflow('create-release-on-merge'), { id: 'gate' });
+  return runBash(script, {
+    env: {
+      GATE_PATHS: paths,
+      SUPPLIED_VERSION: supplied,
+      LATEST_TAG: latest,
+      HEAD_SHA: 'abc123',
+      __GIT_TAGS: tags,
+      __GIT_DIFF_FILES: files.join('\n'),
+    },
+  });
+}
+
+test('release gate: tooling-only changes keep the gate closed', () => {
+  const r = gate({ files: ['.github/CODEOWNERS', 'pyproject.toml', 'uv.lock', 'tests/test_x.py'] });
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(r.outputs.open, 'false');
+});
+
+test('release gate: a nested template file opens it', () => {
+  const r = gate({ files: ['uv.lock', 'template/infra/configurations/llm/gateway_direct.py.jinja'] });
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(r.outputs.open, 'true');
+  assert.match(r.stdout, /template\/infra\/configurations\/llm\/gateway_direct\.py\.jinja/);
+});
+
+test('release gate: an exact path opens it', () => {
+  assert.equal(gate({ files: ['copier.yml'] }).outputs.open, 'true');
+});
+
+test('release gate: a pattern does not match a lookalike prefix', () => {
+  // `template/**` must not cover `templates/` or a root file named `template`.
+  const r = gate({ files: ['templates/x.jinja', 'template', 'docs/copier.yml'] });
+  assert.equal(r.outputs.open, 'false');
+});
+
+test('release gate: no changes at all keeps it closed', () => {
+  assert.equal(gate({ files: [] }).outputs.open, 'false');
+});
+
+test('release gate: no previous tag opens it for the first release', () => {
+  const r = gate({ tags: '', latest: '0.0.0', files: [] });
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(r.outputs.open, 'true');
+});
+
+test('release gate: finds a v-prefixed tag the scan stripped', () => {
+  // With no base found the gate would open unconditionally, so a closed gate
+  // here proves the `v` spelling was resolved and diffed against.
+  const r = gate({ tags: 'v1.4.9', latest: '1.4.9', files: ['README.md'] });
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(r.outputs.open, 'false');
+});
+
+test('release gate: blank lines, indentation, and comments are ignored', () => {
+  const paths = '\n  # what Copier renders\n  copier.yml\n\n  template/**  \n';
+  assert.equal(gate({ paths, files: ['template/a.jinja'] }).outputs.open, 'true');
+  assert.equal(gate({ paths, files: ['README.md'] }).outputs.open, 'false');
+});
+
+test('release gate: a gate with only comments is an error, not a silent close', () => {
+  const r = gate({ paths: '# nothing here\n', files: ['template/a.jinja'] });
+  assert.equal(r.code, 1);
+  assert.match(r.stderr, /names no paths/);
+});
+
+test('release gate: refuses to combine with an explicit version', () => {
+  const r = gate({ supplied: '2.0.0', files: ['template/a.jinja'] });
+  assert.equal(r.code, 1);
+  assert.match(r.stderr, /only applies in auto mode/);
+});
+
+test('release gate: a pattern is matched, never executed', () => {
+  const marker = join(mkdtempSync(join(tmpdir(), 'wf-gate-')), 'pwned');
+  const r = gate({ paths: `$(touch ${marker})\n`, files: ['template/a.jinja'] });
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(r.outputs.open, 'false');
+  assert.equal(spawnSync('test', ['-e', marker]).status, 1, 'the pattern must not run');
+});
+
 // --------------------------------------------------------------------------
 // mark-pr-to-review.yaml — single Slack notification payload
 // --------------------------------------------------------------------------
