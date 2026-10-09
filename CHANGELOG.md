@@ -14,6 +14,14 @@ Entries below 0.0.19 were backfilled from the
 than exhaustive.
 
 ## Unreleased
+- `create-release-on-merge.yaml` takes an optional `release_gate_paths`, for a gated release.
+  When set, auto mode only cuts a release if a file matching one of the newline-separated patterns
+  changed since the latest tag. Otherwise the run is a no-op with `released=false`. This is for
+  Copier templates: every tag makes Diffington open a sync pull request in every consumer, so a
+  tag that only changed CI or CODEOWNERS was pure noise downstream. The comparison is against
+  the latest tag, so a gated change whose release failed is still released by the next merge.
+  Combining it with `version` is an error. Defaults to empty, so this changes nothing for a
+  consumer that does not opt in. New example: `workflow-create-release-copier-template.yaml`.
 - `automerge.yaml` takes an optional `block_on_cursor_comments`. Cursor Bugbot reports its
   findings as inline review comments rather than as a check, and its parent review is
   `COMMENTED`, a state automerge ignores on purpose so an ordinary remark cannot stop a merge.

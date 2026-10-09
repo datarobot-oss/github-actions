@@ -86,12 +86,13 @@ To upgrade later, bump the `@0.0.20` ref in the `uses:` lines to a newer
 | [`workflow-backport.yaml`](examples/workflow-backport.yaml) | Cherry-picks a merged PR onto one or more release branches, opening a PR per branch | `backport <branch>` label on a merged PR, or manual dispatch | `BACKPORT_APP_ID`, `BACKPORT_APP_PRIVATE_KEY` (both optional) |
 | [`workflow-ensure-labels.yaml`](examples/workflow-ensure-labels.yaml) | Creates the labels the other workflows require. Idempotent; run once at setup | manual dispatch | none |
 | [`workflow-create-release-on-merge.yaml`](examples/workflow-create-release-on-merge.yaml) | Tags the next patch version and cuts a GitHub release | push to `main` | none |
+| [`workflow-create-release-copier-template.yaml`](examples/workflow-create-release-copier-template.yaml) | The same, gated: only releases when `copier.yml` or `template/**` changed since the latest tag, so tooling-only merges do not trigger downstream Copier syncs | push to `main` | none |
 | [`workflow-create-release-from-pyproject.yaml`](examples/workflow-create-release-from-pyproject.yaml) | Tags the version `pyproject.toml` declares and cuts a GitHub release. No-ops when the version was not bumped | push to `main` | none |
 | [`workflow-check-changelog.yaml`](examples/workflow-check-changelog.yaml) | Fails a PR that did not update `CHANGELOG.md`. Waivable with a label | pull request | none |
 | [`workflow-check-changelog-versioned.yaml`](examples/workflow-check-changelog-versioned.yaml) | The same, but also requires a heading for the version `pyproject.toml` declares | pull request | none |
 | [`workflow-automerge.yaml`](examples/workflow-automerge.yaml) | Approves and merges PRs opened by an allow-listed bot, once every check the repo expects has reported green. Policy lives in `.github/automerge.yaml` | 10-minute cron; manual | `DR_AUTO_MERGE_PRIVATE_KEY` |
 
-The last three are the release story, and [docs/RELEASE.md](docs/RELEASE.md) explains which pair to
+The release workflows and the changelog gates are the release story, and [docs/RELEASE.md](docs/RELEASE.md) explains which pair to
 pick: it comes down to whether a version string already exists inside your repo, or lives only in
 your git tags.
 
@@ -143,6 +144,7 @@ never overwrites your choice.
 | `status_icon_success` / `_failure` / `_pending` | `notify-slack.yaml` | `:white_check_mark:` / `:x:` / `:hourglass_flowing_sand:` | You want the digest's CI-status column to use custom emoji. Defaults are Slack built-ins, which exist in every workspace; a custom emoji name that is not installed renders as literal `:name:` text. |
 | `header_icon` | `notify-slack.yaml` | `clipboard` | You want a different emoji at the head of the digest. |
 | `version` | `create-release-on-merge.yaml` | empty (bump the latest tag's patch) | Your version already lives in the repo. Pass it and that exact string is tagged, so the tag and the packaged artifact cannot drift. Requires `0.0.22`. |
+| `release_gate_paths` | `create-release-on-merge.yaml` | empty (release on every merge) | You publish a Copier template, or anything where only some paths reach consumers. Newline-separated patterns; a release is only cut when a matching file changed since the latest tag. Auto mode only. Requires `0.0.32`. |
 | `version` | `check-changelog.yaml` | empty (only check the file moved) | You know the version while the PR is open, so the entry can be filed under it. The check then also requires a heading naming that version. Requires `0.0.22`. |
 | `changelog_path` | `check-changelog.yaml` | `CHANGELOG.md` | Your changelog is somewhere else. Requires `0.0.22`. |
 | `skip_label` | `check-changelog.yaml` | `skip-changelog` | You already have a label for this. It does not need to exist until someone applies it. Requires `0.0.22`. |

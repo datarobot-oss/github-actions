@@ -13,7 +13,7 @@ string already exist inside your repository?**
 | --- | --- | --- |
 | Release workflow | [`workflow-create-release-on-merge.yaml`](../examples/workflow-create-release-on-merge.yaml) | [`workflow-create-release-from-pyproject.yaml`](../examples/workflow-create-release-from-pyproject.yaml) |
 | Changelog gate | [`workflow-check-changelog.yaml`](../examples/workflow-check-changelog.yaml) | [`workflow-check-changelog-versioned.yaml`](../examples/workflow-check-changelog-versioned.yaml) |
-| Every merge cuts a release? | Yes | Only when the version was bumped |
+| Every merge cuts a release? | Yes, unless gated by path | Only when the version was bumped |
 | Version known while the PR is open? | No | Yes |
 
 This repo itself is the first column. A Python package that ships a wheel is
@@ -23,7 +23,8 @@ almost always the second.
 
 `create-release-on-merge.yaml` with no inputs. On every push to `main` it takes
 the highest existing `X.Y.Z` tag, adds one to the patch, tags that, and cuts a
-release with auto-generated notes.
+release with auto-generated notes. A [gated release](#gated-releases-only-release-what-consumers-receive)
+limits that to merges that touch paths you name.
 
 Nothing in the repo records the version, so there is nothing to keep in sync and
 nothing a pull request can forget. The trade-off is that every merge publishes,
@@ -33,6 +34,48 @@ The changelog gate can only be the naive one here: while a pull request is open,
 nobody knows which number the entry will land under. Contributors add bullets
 under an `## Unreleased` heading and those get a version heading when the release
 is cut.
+
+### Gated releases: only release what consumers receive
+
+Think of the tag as a delivery truck. Every tag drives out to every repo that
+consumes yours. For a Copier template that is literal: Diffington watches for new
+tags and opens a sync pull request in every downstream repo, and each of those
+runs its own CI. A tag that only changed your CI or your CODEOWNERS sends a
+truck with nothing in it.
+
+A gated release fixes that. Pass `release_gate_paths` and a release is only cut
+when a file matching one of those paths changed since the latest tag:
+
+```yaml
+    with:
+      release_gate_paths: |
+        copier.yml
+        template/**
+```
+
+Anything else merges normally and the release job exits with a notice, with
+`released` set to `false` and `version` set to the latest tag.
+[`workflow-create-release-copier-template.yaml`](../examples/workflow-create-release-copier-template.yaml)
+is the full example.
+
+Rules worth knowing:
+
+- **It compares against the latest tag, not the previous commit.** If a gated
+  change merges and its release fails, the next merge still sees that change and
+  releases it. That is also why the example has no `paths:` filter on its
+  trigger: a filter would skip every run until the template moved again.
+- **`*` matches across directories.** `template/*` and `template/**` both cover
+  everything under `template/`. `template/**` does not match `templates/`.
+- **No tag yet means the gate is open**, so the first release always goes out.
+- **Auto mode only.** Combining it with `version` is an error, because in that
+  mode the version bump already decides whether to release.
+- **List what Copier reads, not just the template folder.** `copier.yml` changes
+  the questions and defaults consumers render with, so it belongs in the gate.
+
+The trade-off: a fix to a file outside the gate (a `README.md` at the repo root,
+say) ships no release. That is the point for a template, where the root is not
+what consumers get. Do not gate a repo whose consumers pin it for anything
+outside those paths.
 
 ## Model 2: the tree is the version
 
