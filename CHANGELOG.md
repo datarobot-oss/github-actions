@@ -14,6 +14,14 @@ Entries below 0.0.19 were backfilled from the
 than exhaustive.
 
 ## Unreleased
+- `automerge.yaml` takes an optional `branches` input for LTS branches, mirroring cve-sync's
+  resync. Each listed base branch runs as its own matrix leg that checks out that branch, reads
+  its `.github/automerge.yaml`, and acts only on PRs into it, so an LTS branch is judged by its
+  own policy and rulesets. The default branch must be listed, and globs are refused.
+  **Behaviour change:** before this, the single run judged open PRs into ANY base branch against
+  the default branch's policy. Now only PRs into a listed branch are considered (the default
+  branch alone when the input is unset), so a labelled bot PR into an unlisted branch is no
+  longer merged.
 - `create-release-on-merge.yaml` takes an optional `release_gate_paths`, for a gated release.
   When set, auto mode only cuts a release if a file matching one of the newline-separated patterns
   changed since the latest tag. Otherwise the run is a no-op with `released=false`. This is for

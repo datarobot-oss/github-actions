@@ -155,6 +155,42 @@ you think it says.
 Even in `merge` mode the approval and the merge happen on **different polls**, so there is
 always a window in which a person can intervene.
 
+## LTS and other non-default branches
+
+By default only PRs into the default branch are considered. To cover an LTS branch as well, list
+every base branch in the `branches` input, default branch included:
+
+```yaml
+    with:
+      app_id: '4912188'
+      mode: 'merge'
+      branches: |
+        main
+        release/12.0
+```
+
+Each branch runs as its own matrix leg. Think of it as one inspector per branch, each holding that
+branch's own rulebook. A leg checks out its branch, reads `.github/automerge.yaml` from there, and
+only looks at PRs whose base is that branch. So an LTS branch can carry a stricter policy than
+main (fewer `allowed_paths`, different `expected_checks`) and its PRs are judged by it.
+
+What a listed branch needs:
+
+- **Its own `.github/automerge.yaml`.** A listed branch without one fails its leg loudly. The other
+  legs still run. An LTS cut from main after main enrolled already has it.
+- **Rulesets that target it.** The required checks are read from the rules API for the PR's base
+  branch, so a ruleset that only matches `main` gives the LTS leg nothing to enforce server side.
+  Point both stacked rulesets (and the App's bypass entry) at the LTS branches too.
+- **The same list as the producer.** If cve-sync resyncs `release/12.0`, list it here as well, or
+  its PRs are opened with the `automerge` label and never picked up.
+
+Branches are exact names. Globs are refused, and a list that leaves out the default branch is
+refused, the same rules as cve-sync's `branches`. A branch nobody listed is never touched, so
+pushing a permissive policy onto some other branch enrols nothing.
+
+The workflow definition itself still comes from the default branch: a schedule always runs there,
+and only the policy is read per branch.
+
 ## Why a cron and not `pull_request`
 
 Three independent reasons:
@@ -172,8 +208,8 @@ The cost is latency. A bot PR merges in roughly 10 to 20 minutes rather than ins
 
 Cheapest first. Any failure is a no-op that is logged, never a red X on the PR.
 
-1. Policy file present on the **default branch**. A scheduled run checks out the default branch
-   by construction, so a PR can never supply a policy that grants itself permission.
+1. Policy file present on the PR's **base branch**, which the leg checks out by name. The policy
+   is never read from a PR head, so a PR can never supply a policy that grants itself permission.
 2. The opt-in label is present.
 3. The PR author is in `allowed_authors`.
 4. **Every commit is authored and committed by an allow-listed bot.** Not just the PR opener:
@@ -287,6 +323,7 @@ Either way the PR reaches a resolution. It never just sits there.
 Three independent levers, any one sufficient:
 
 - **One PR:** remove the label.
+- **One branch:** delete `.github/automerge.yaml` from it and drop it from `branches`.
 - **One repo:** delete `.github/automerge.yaml`.
 - **Everywhere:** remove the App's bypass entry, or uninstall the App.
 

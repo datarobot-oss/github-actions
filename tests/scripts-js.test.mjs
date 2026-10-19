@@ -776,11 +776,13 @@ const happyPath = (over = {}) =>
     ...over,
   });
 
-const runAutomerge = (github, { mode = 'merge', config = {} } = {}) =>
+const runAutomerge = (github, { mode = 'merge', config = {}, base = 'main' } = {}) =>
   runGithubScript(automergeScript(), {
     github,
     context: ctx,
-    env: { MODE: mode, APP_SLUG: 'dr-auto-merge', AUTOMERGE_CONFIG: policy(config) },
+    env: {
+      MODE: mode, APP_SLUG: 'dr-auto-merge', AUTOMERGE_CONFIG: policy(config), BASE_BRANCH: base,
+    },
   });
 
 const mergeCalls = (github) => github.callsTo('rest.pulls.merge');
@@ -1565,4 +1567,87 @@ test('automerge: a merge_method the ruleset could never accept fails the run', a
     () => runAutomerge(happyPath(), { config: { merge_method: 'fast-forward' } }),
     /core\.setFailed: Invalid merge_method/,
   );
+});
+
+// --- LTS branches: one leg per base branch, each with its own policy -------
+test('automerge: a leg lists only PRs into its own branch', async () => {
+  const github = happyPath();
+
+  await runAutomerge(github, { base: 'release/12.0' });
+
+  assert.equal(github.callsTo('rest.pulls.list')[0].params.base, 'release/12.0');
+});
+
+// Belt and braces for the API filter: judging a PR by another branch's policy
+// would apply the wrong allowed_paths and expected_checks.
+test('automerge: a PR into another branch is never judged by this leg', async () => {
+  const github = happyPath({
+    'rest.pulls.list': { data: [aPr({ base: { ref: 'release/12.0' } })] },
+    'rest.pulls.listReviews': { data: [{ state: 'APPROVED', user: { login: BOT } }] },
+  });
+
+  await runAutomerge(github, { base: 'main' });
+
+  assert.equal(mergeCalls(github).length, 0);
+  assert.equal(github.callsTo('rest.pulls.listCommits').length, 0, 'not even evaluated');
+  assert.equal(commentBodies(github).length, 0);
+});
+
+test('automerge: an LTS leg merges into its branch and reads that branch\'s rulesets', async () => {
+  const github = happyPath({
+    'rest.pulls.list': { data: [aPr({ base: { ref: 'release/12.0' } })] },
+    'rest.pulls.listReviews': { data: [{ state: 'APPROVED', user: { login: BOT } }] },
+  });
+
+  await runAutomerge(github, { base: 'release/12.0' });
+
+  assert.equal(mergeCalls(github).length, 1);
+  const rules = github.callsTo('request').filter((c) => c.route.includes('/rules/branches/'));
+  assert.equal(rules[0].params.branch, 'release/12.0');
+});
+
+test('automerge: a missing BASE_BRANCH fails the run rather than judging every PR', async () => {
+  await assert.rejects(
+    () => runAutomerge(happyPath(), { base: '' }),
+    /core\.setFailed: BASE_BRANCH is not set/,
+  );
+});
+
+// --------------------------------------------------------------------------
+// automerge.yaml — "Plan one leg per branch"
+// --------------------------------------------------------------------------
+const planScript = () =>
+  githubScript(loadWorkflow('automerge'), { name: 'Plan one leg per branch' });
+
+const planBranches = async (branches, defaultBranch = 'main') => {
+  const { outputs } = await runGithubScript(planScript(), {
+    github: makeGithub(),
+    context: ctx,
+    env: { BRANCHES: branches, DEFAULT_BRANCH: defaultBranch },
+  });
+  return JSON.parse(outputs.branches);
+};
+
+test('automerge plan: unset covers the default branch alone', async () => {
+  assert.deepEqual(await planBranches(''), ['main']);
+  assert.deepEqual(await planBranches('  \n', 'master'), ['master']);
+});
+
+test('automerge plan: a list gives one leg per branch, deduplicated', async () => {
+  assert.deepEqual(
+    await planBranches('main\nrelease/12.0, release/12.1\n\nmain\n'),
+    ['main', 'release/12.0', 'release/12.1'],
+  );
+});
+
+test('automerge plan: a list without the default branch is refused', async () => {
+  await assert.rejects(() => planBranches('release/12.0'), /must include the default branch \(main\)/);
+});
+
+test('automerge plan: globs are refused, so a new branch cannot enrol itself', async () => {
+  await assert.rejects(() => planBranches('main\nrelease/*'), /globs are not supported/);
+});
+
+test('automerge plan: a full ref is refused', async () => {
+  await assert.rejects(() => planBranches('main\nrefs/heads/release/12.0'), /not a full ref/);
 });
