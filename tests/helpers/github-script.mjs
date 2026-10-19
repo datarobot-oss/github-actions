@@ -151,13 +151,15 @@ export async function runGithubScript(script, { github, context, env = {}, templ
     addRaw: () => summary,
     write: async () => summary,
   };
+  const outputs = {};
   const core = {
     setFailed: (m) => { throw new Error(`core.setFailed: ${m}`); },
+    setOutput: (name, value) => { outputs[name] = value; },
     info: () => {},
     warning: () => {},
     summary,
   };
   const fn = new AsyncFunction('github', 'context', 'core', 'process', 'console', rendered);
   await fn(github, context, core, fakeProcess, fakeConsole);
-  return { logs };
+  return { logs, outputs };
 }

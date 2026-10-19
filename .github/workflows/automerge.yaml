@@ -38,6 +38,13 @@ name: Automerge bot PRs
 #      bot silently skips those PRs forever; a poller self-heals.
 #   3. "Wait for the checks to finish" falls out for free, with no sleep loop
 #      burning runner minutes and no job timeout to lose the PR to.
+#
+# EACH BRANCH IS ITS OWN LEG. `branches` lists the base branches to cover (an
+# LTS branch next to main, say). Each leg checks out its branch, reads THAT
+# branch's policy, and only looks at PRs into it, so an LTS branch's paths and
+# checks are judged by its own rules. Branches are named explicitly: a branch
+# no one listed is never touched, so pushing a permissive policy onto an
+# arbitrary branch enrols nothing.
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:
@@ -68,6 +75,16 @@ on:
         required: false
         default: '.github/automerge.yaml'
         type: string
+      branches:
+        description: >-
+          Base branches to cover, one per line. Each gets its own leg, which
+          reads the policy from that branch and acts only on PRs into it. The
+          default branch must be listed too; leave this unset to cover the
+          default branch alone. Every listed branch needs its own policy file,
+          or its leg fails.
+        required: false
+        default: ''
+        type: string
     secrets:
       app_private_key:
         description: >-
@@ -76,8 +93,70 @@ on:
         required: true
 
 jobs:
-  automerge:
+  targets:
+    name: Plan branches
     runs-on: ubuntu-latest
+    permissions: {}
+    outputs:
+      branches: ${{ steps.plan.outputs.branches }}
+    steps:
+      - name: Plan one leg per branch
+        id: plan
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+        env:
+          BRANCHES: ${{ inputs.branches }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        with:
+          script: |
+            const defaultBranch = process.env.DEFAULT_BRANCH;
+            if (!defaultBranch) {
+              core.setFailed('Could not tell which branch is the default branch.');
+              return;
+            }
+
+            const listed = (process.env.BRANCHES || '')
+              .split(/[\n,]/)
+              .map((name) => name.trim())
+              .filter(Boolean);
+            if (listed.length === 0) {
+              core.setOutput('branches', JSON.stringify([defaultBranch]));
+              return;
+            }
+
+            for (const name of listed) {
+              if (name.startsWith('refs/')) {
+                core.setFailed(`branches: give the branch name, not a full ref: ${JSON.stringify(name)}`);
+                return;
+              }
+              // Exact names only, so a new branch matching a pattern never
+              // enrols itself.
+              if (/[*?[\]]/.test(name)) {
+                core.setFailed(`branches: name each branch exactly, globs are not supported: ${JSON.stringify(name)}`);
+                return;
+              }
+            }
+            // Same rule as cve-sync's resync: a list that leaves out the
+            // default branch is more likely a mistake than a wish to stop
+            // covering it.
+            if (!listed.includes(defaultBranch)) {
+              core.setFailed(
+                `branches must include the default branch (${defaultBranch}). ` +
+                'Leave the input unset to cover the default branch alone.',
+              );
+              return;
+            }
+
+            core.setOutput('branches', JSON.stringify([...new Set(listed)]));
+
+  automerge:
+    name: Automerge (${{ matrix.branch }})
+    needs: targets
+    runs-on: ubuntu-latest
+    # One branch missing its policy must not stop the others.
+    strategy:
+      fail-fast: false
+      matrix:
+        branch: ${{ fromJSON(needs.targets.outputs.branches) }}
     permissions:
       # Only so `actions/checkout` can read the policy file. Every WRITE below
       # is made with the App installation token, not GITHUB_TOKEN —
@@ -88,12 +167,13 @@ jobs:
       contents: read
 
     steps:
-      # A scheduled run always checks out the default branch, so the policy can
-      # never be read from a PR head. That matters: a PR that could supply its
-      # own automerge policy could grant itself permission to be merged.
-      - name: Check out the default branch
+      # The policy comes from the BASE branch, never a PR head. That matters: a
+      # PR that could supply its own automerge policy could grant itself
+      # permission to be merged.
+      - name: Check out the base branch
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
+          ref: ${{ matrix.branch }}
           persist-credentials: false
 
       - name: Read the automerge policy
@@ -103,9 +183,10 @@ jobs:
           # input is caller-controlled and would otherwise be expanded into bash
           # source before bash ever parses the line.
           CONFIG_PATH: ${{ inputs.config_path }}
+          BASE_BRANCH: ${{ matrix.branch }}
         run: |
           if [ ! -f "$CONFIG_PATH" ]; then
-            echo "::error::No automerge policy at '$CONFIG_PATH'. The policy file is what enrols a repo; add it, or remove this workflow." >&2
+            echo "::error::No automerge policy at '$CONFIG_PATH' on '$BASE_BRANCH'. The policy file is what enrols a branch; add it there, or remove the branch from the workflow's branches." >&2
             exit 1
           fi
 
@@ -176,7 +257,7 @@ jobs:
             echo '__AUTOMERGE_EOF__'
           } >> "$GITHUB_ENV"
 
-          echo "Loaded policy from $CONFIG_PATH"
+          echo "Loaded policy from $CONFIG_PATH on $BASE_BRANCH"
 
       - name: Mint an App installation token
         id: app-token
@@ -190,6 +271,7 @@ jobs:
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         env:
           MODE: ${{ inputs.mode }}
+          BASE_BRANCH: ${{ matrix.branch }}
           # AUTOMERGE_CONFIG is already in the environment, set by the step above.
           #
           # `create-github-app-token` reports the App's slug, from which the bot
@@ -213,6 +295,14 @@ jobs:
 
             const owner = context.repo.owner;
             const repo = context.repo.repo;
+
+            // The branch whose policy was loaded. Only PRs into it are judged
+            // here, since another branch's PRs answer to another policy.
+            const baseBranch = process.env.BASE_BRANCH;
+            if (!baseBranch) {
+              core.setFailed('BASE_BRANCH is not set; refusing to judge PRs against an unknown policy.');
+              return;
+            }
 
             // ---------------------------------------------------------------
             // Config
@@ -697,11 +787,15 @@ jobs:
             // Main
             // ---------------------------------------------------------------
             const prs = await github.paginate(github.rest.pulls.list, {
-              owner, repo, state: 'open', per_page: 100,
+              owner, repo, state: 'open', base: baseBranch, per_page: 100,
             });
 
             const rows = [];
             for (const pr of prs) {
+              // The API filters by `base` already. Checked again because
+              // judging a PR by another branch's policy is the one mistake
+              // this leg must never make.
+              if (pr.base?.ref !== baseBranch) continue;
               const verdict = await evaluate(pr);
               rows.push([`#${pr.number}`, verdict.eligible ? 'eligible' : 'skipped', verdict.reason || '']);
 
@@ -823,7 +917,7 @@ jobs:
             }
 
             await core.summary
-              .addHeading(`Automerge (${cfg.mode} mode)`, 3)
+              .addHeading(`Automerge on ${baseBranch} (${cfg.mode} mode)`, 3)
               .addTable([
                 [{ data: 'PR', header: true }, { data: 'Outcome', header: true }, { data: 'Reason', header: true }],
                 ...rows,
